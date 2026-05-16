@@ -85,8 +85,20 @@ class CodeChunker:
                     if chunk:
                         chunks.append(chunk)
             
-            # If no chunks were created or file is small, return whole file
-            if not chunks or len(lines) <= self.max_chunk_size:
+            # If no chunks were created, return whole file
+            if not chunks:
+                return [CodeChunk(
+                    type="file",
+                    name=file_path,
+                    lines=f"1-{len(lines)}",
+                    content=content,
+                    start_line=1,
+                    end_line=len(lines),
+                    size=len(lines)
+                )]
+            
+            # If file is small and we only have imports, return whole file
+            if len(lines) <= self.MIN_CHUNK_SIZE and len(chunks) == 1 and chunks[0].type == "imports":
                 return [CodeChunk(
                     type="file",
                     name=file_path,

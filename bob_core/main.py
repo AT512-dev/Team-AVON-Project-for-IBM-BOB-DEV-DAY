@@ -75,6 +75,9 @@ async def ask_mentor(request: AskRequest):
     
     Provides context-aware answers about repository structure and code
     """
+    # Determine query type early so we can use it in error responses
+    query_type = classify_query(request.question)
+    
     try:
         # 1. Retrieve relevant context
         retriever = ContextRetriever(request.repo_path)
@@ -83,10 +86,7 @@ async def ask_mentor(request: AskRequest):
             focus_file=request.current_file
         )
         
-        # 2. Determine query type
-        query_type = classify_query(request.question)
-        
-        # 3. Build enhanced prompt
+        # 2. Build enhanced prompt
         repo_name = os.path.basename(request.repo_path)
         
         # Prepare context variables for prompt
@@ -118,7 +118,7 @@ async def ask_mentor(request: AskRequest):
             **prompt_kwargs
         )
         
-        # 4. Call IBM Bob via existing service
+        # 3. Call IBM Bob via existing service
         from bob_core.bob_service import build_payload, build_headers, WATSONX_GENERATE_URL
         import httpx
         
@@ -135,7 +135,7 @@ async def ask_mentor(request: AskRequest):
             results = response.json().get("results", [])
             raw_response = results[0].get("generated_text", "I couldn't generate a response.") if results else "I couldn't generate a response."
         
-        # 5. Format for UI
+        # 4. Format for UI
         formatted = format_mentor_response(
             raw_response=raw_response,
             context=context,
@@ -147,5 +147,5 @@ async def ask_mentor(request: AskRequest):
     except HTTPException:
         raise
     except Exception as e:
-        # Return formatted error response
-        return format_error_response(str(e), query_type="general")
+        # Return formatted error response with correct query_type
+        return format_error_response(str(e), query_type=query_type)

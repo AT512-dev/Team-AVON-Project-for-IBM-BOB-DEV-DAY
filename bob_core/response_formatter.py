@@ -154,10 +154,11 @@ def extract_next_steps(raw_response: str) -> List[str]:
     
     # Look for common patterns indicating next steps
     patterns = [
-        r'(?:start by|begin with|first,?\s+(?:study|check|review|understand))\s+([^.]+)',
-        r'(?:next,?\s+(?:study|check|review|look at))\s+([^.]+)',
-        r'(?:then,?\s+(?:study|check|review|examine))\s+([^.]+)',
-        r'(?:you should|recommend|suggest)\s+(?:studying|checking|reviewing)\s+([^.]+)',
+        r'(?:start by|begin with|first,?\s+(?:study|check|review|understand))\s+([^.!?]+)',
+        r'(?:next,?\s+(?:study|check|review|look at))\s+([^.!?]+)',
+        r'(?:then,?\s+(?:study|check|review|examine))\s+([^.!?]+)',
+        r'(?:you should|recommend|suggest)\s+(?:studying|checking|reviewing)\s+([^.!?]+)',
+        r'(?:start\s+(?:by\s+)?studying|check)\s+([a-zA-Z_]+\.py)',
     ]
     
     for pattern in patterns:
