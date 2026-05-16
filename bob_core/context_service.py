@@ -35,17 +35,25 @@ class ContextRetriever:
     Builds bidirectional dependency graph and caches repository structure
     """
     
-    def __init__(self, repo_path: str):
+    def __init__(self, repo_path: str, use_dependency_scores: bool = True):
         """
         Initialize context retriever for a repository
         
         Args:
             repo_path: Path to the repository root
+            use_dependency_scores: Whether to use Karl's dependency scores
         """
         self.repo_path = repo_path
         self.repo_map: Optional[RepoMap] = None
         self.reverse_deps: Dict[str, List[str]] = {}
+        self.use_dependency_scores = use_dependency_scores
+        self.dependency_provider = None
         self._build_context()
+        
+        # Initialize dependency score provider if enabled
+        if use_dependency_scores:
+            from bob_core.dependency_integration import DependencyScoreProvider
+            self.dependency_provider = DependencyScoreProvider(use_mock=True)
     
     def _build_context(self):
         """Build complete repository context with bidirectional dependencies"""
@@ -69,12 +77,13 @@ class ContextRetriever:
             self.repo_map = RepoMap(files={})
             self.reverse_deps = {}
     
-    def get_file_context(self, file_path: str) -> Optional[FileContext]:
+    def get_file_context(self, file_path: str, include_content: bool = True) -> Optional[FileContext]:
         """
         Get complete context for a specific file
         
         Args:
             file_path: Path to the file (relative to repo root)
+            include_content: Whether to include file content (set False for large files)
         
         Returns:
             FileContext object or None if file not found
@@ -87,9 +96,19 @@ class ContextRetriever:
             
             imports = self.repo_map.files[file_path]
             imported_by = self.reverse_deps.get(file_path, [])
-            complexity = compute_complexity(file_path, imports)
-            content = self._read_file(file_path)
-            loc = self._count_loc(content)
+            
+            # Get complexity from dependency provider if available, otherwise compute
+            if self.dependency_provider:
+                dep_score = self.dependency_provider.get_file_score(file_path)
+                if dep_score:
+                    complexity = self.dependency_provider._complexity_label(dep_score.complexity)
+                else:
+                    complexity = compute_complexity(file_path, imports)
+            else:
+                complexity = compute_complexity(file_path, imports)
+            
+            content = self._read_file(file_path) if include_content else ""
+            loc = self._count_loc(content) if content else 0
             
             return FileContext(
                 path=file_path,
@@ -102,6 +121,22 @@ class ContextRetriever:
         except Exception as e:
             print(f"Warning: Failed to get context for {file_path}: {e}")
             return None
+    
+    def get_files_with_scores(self, file_paths: List[str]) -> List[Dict[str, Any]]:
+        """
+        Get files with dependency scores for learning path recommendations
+        
+        Args:
+            file_paths: List of file paths
+        
+        Returns:
+            List of files with scores, sorted by learning priority
+        """
+        if not self.dependency_provider:
+            # Fallback: return files with basic info
+            return [{"file_path": fp, "complexity": "Unknown"} for fp in file_paths]
+        
+        return self.dependency_provider.get_learning_path(file_paths)
     
     def get_relevant_context(
         self, 
