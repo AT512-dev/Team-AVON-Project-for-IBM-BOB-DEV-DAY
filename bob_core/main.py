@@ -12,33 +12,52 @@ from bob_core.context_service import ContextRetriever
 from bob_core.prompts import build_mentor_prompt, classify_query
 from bob_core.response_formatter import format_mentor_response, format_error_response, format_compass_response
 from bob_core.orchestration import CompassOrchestrator
+from bob_core.git_utils import clone_github_repo, cleanup_temp_repo, is_valid_github_url, GitCloneError
 from engine.parser import parse_repository
 from engine.metrics import compute_complexity
 
 app = FastAPI(title="Compass AI", version="1.0.0")
 
 class OnboardRequest(BaseModel):
-    repo_path: str
+    github_url: str
     task_description: Optional[str] = "Understand the codebase architecture"
 
 class CompassAnalysisRequest(BaseModel):
-    repo_path: str
+    github_url: str
     task_description: Optional[str] = "Understand the codebase architecture"
     max_roadmap_files: Optional[int] = 10
     include_tests: Optional[bool] = False
 
 class AskRequest(BaseModel):
-    repo_path: str
+    github_url: str
     question: str
     current_file: Optional[str] = None
     context: Optional[Dict[str, Any]] = None
 
 @app.post("/api/v1/generate-roadmap", response_model=OnboardPayload)
 async def generate_roadmap(request: OnboardRequest):
+    # Validate GitHub URL
+    if not is_valid_github_url(request.github_url):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid GitHub URL: {request.github_url}"
+        )
+    
+    temp_repo_path = None
     try:
-        repo_map = parse_repository(request.repo_path)
+        # Clone the GitHub repository
+        temp_repo_path, repo_name = clone_github_repo(request.github_url)
+        
+        # Parse the cloned repository
+        repo_map = parse_repository(temp_repo_path)
+    except GitCloneError as exc:
+        raise HTTPException(status_code=422, detail=f"Failed to clone repository: {str(exc)}")
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Repository parsing failed: {str(exc)}")
+    finally:
+        # Cleanup temporary directory
+        if temp_repo_path:
+            cleanup_temp_repo(temp_repo_path)
 
     roadmap_steps = []
     primary_file_content = ""
@@ -77,11 +96,13 @@ async def analyze_repository_compass(request: CompassAnalysisRequest):
     Complete Compass AI Analysis Endpoint
     
     This is the main endpoint that orchestrates the complete workflow:
-    1. Parse repository using engine/parser.py
-    2. Calculate dependency intelligence using engine/dependency_intelligence.py
-    3. Generate learning roadmap with Bob's AI explanations
-    4. Create constellation graph for visualization
-    5. Return formatted JSON for frontend
+    1. Clone GitHub repository to temporary directory
+    2. Parse repository using engine/parser.py
+    3. Calculate dependency intelligence using engine/dependency_intelligence.py
+    4. Generate learning roadmap with Bob's AI explanations
+    5. Create constellation graph for visualization
+    6. Return formatted JSON for frontend
+    7. Cleanup temporary directory
     
     Returns JSON structure:
     {
@@ -114,17 +135,21 @@ async def analyze_repository_compass(request: CompassAnalysisRequest):
         }
     }
     """
+    # Validate GitHub URL
+    if not is_valid_github_url(request.github_url):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid GitHub URL: {request.github_url}"
+        )
+    
+    temp_repo_path = None
     try:
-        # Validate repository path
-        if not os.path.isdir(request.repo_path):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Repository path does not exist: {request.repo_path}"
-            )
+        # Clone the GitHub repository
+        temp_repo_path, repo_name = clone_github_repo(request.github_url)
         
-        # Initialize orchestrator
+        # Initialize orchestrator with cloned repo
         orchestrator = CompassOrchestrator(
-            repo_path=request.repo_path,
+            repo_path=temp_repo_path,
             include_tests=request.include_tests or False
         )
         
@@ -139,6 +164,8 @@ async def analyze_repository_compass(request: CompassAnalysisRequest):
         
         return formatted_response
         
+    except GitCloneError as gce:
+        raise HTTPException(status_code=422, detail=f"Failed to clone repository: {str(gce)}")
     except ValueError as ve:
         raise HTTPException(status_code=422, detail=str(ve))
     except Exception as e:
@@ -146,6 +173,10 @@ async def analyze_repository_compass(request: CompassAnalysisRequest):
             status_code=500,
             detail=f"Analysis failed: {str(e)}"
         )
+    finally:
+        # Always cleanup temporary directory
+        if temp_repo_path:
+            cleanup_temp_repo(temp_repo_path)
 
 @app.get("/health")
 async def health_check():
@@ -158,20 +189,29 @@ async def ask_mentor(request: AskRequest):
     
     Provides context-aware answers about repository structure and code
     """
+    # Validate GitHub URL
+    if not is_valid_github_url(request.github_url):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid GitHub URL: {request.github_url}"
+        )
+    
     # Determine query type early so we can use it in error responses
     query_type = classify_query(request.question)
     
+    temp_repo_path = None
     try:
-        # 1. Retrieve relevant context
-        retriever = ContextRetriever(request.repo_path)
+        # Clone the GitHub repository
+        temp_repo_path, repo_name = clone_github_repo(request.github_url)
+        
+        # 1. Retrieve relevant context from cloned repo
+        retriever = ContextRetriever(temp_repo_path)
         context = retriever.get_relevant_context(
             query=request.question,
             focus_file=request.current_file
         )
         
         # 2. Build enhanced prompt
-        repo_name = os.path.basename(request.repo_path)
-        
         # Prepare context variables for prompt
         prompt_kwargs = {
             "file_path": request.current_file or "N/A",
@@ -227,8 +267,14 @@ async def ask_mentor(request: AskRequest):
         
         return formatted
         
+    except GitCloneError as gce:
+        return format_error_response(f"Failed to clone repository: {str(gce)}", query_type=query_type)
     except HTTPException:
         raise
     except Exception as e:
         # Return formatted error response with correct query_type
         return format_error_response(str(e), query_type=query_type)
+    finally:
+        # Always cleanup temporary directory
+        if temp_repo_path:
+            cleanup_temp_repo(temp_repo_path)
