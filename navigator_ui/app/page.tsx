@@ -50,6 +50,12 @@ export default function Home() {
   );
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
+  // ── File viewer state ─────────────────────────────────────────────────────
+  const [fileViewMode, setFileViewMode] = useState(false);
+  const [fileContent, setFileContent] = useState<string | null>(null);
+  const [fileLoading, setFileLoading] = useState(false);
+  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
+
   // ── Fetch initial roadmap when connected ──────────────────────────────────
   useEffect(() => {
     if (!connected) return;
@@ -156,6 +162,54 @@ export default function Home() {
     } finally {
       setIsLoading(false);
     }
+  }, []);
+
+  // ── Handle file node click → fetch file details from API ──────────────────
+  const handleFileNodeClick = useCallback(
+    async (filePath: string) => {
+      console.log("📄 File clicked:", filePath);
+      setSelectedFilePath(filePath);
+      setFileViewMode(true);
+      setFileLoading(true);
+      setFileContent(null);
+
+      try {
+        const response = await fetch("http://localhost:8000/api/v1/ask", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            repo_path: DEMO_REPO_URL,
+            question: `Show me the code and explain the file structure of ${filePath}`,
+            current_file: filePath,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`API responded with status ${response.status}`);
+        }
+
+        const data = await response.json();
+        setFileContent(data.answer || "No content returned from API");
+        console.log("✅ File content loaded");
+      } catch (err) {
+        console.error("❌ Error fetching file:", err);
+        setFileContent(
+          `Error loading file: ${err instanceof Error ? err.message : "Unknown error"}`
+        );
+      } finally {
+        setFileLoading(false);
+      }
+    },
+    []
+  );
+
+  // ── Handle back to map ────────────────────────────────────────────────────
+  const handleBackToMap = useCallback(() => {
+    setFileViewMode(false);
+    setFileContent(null);
+    setSelectedFilePath(null);
   }, []);
 
   // ── Derive level nodes ────────────────────────────────────────────────────
@@ -416,45 +470,217 @@ export default function Home() {
         />
 
         <CenterPanel>
-          <VisualizationContainer
-            currentView={currentView}
-            onViewChange={setCurrentView}
-            stats={{
-              filesFound: repoFiles.length,
-              criticalPaths: 0,
-              completionPercentage: 0,
-            }}
-            selectedModule={selectedModule}
-          >
-            {currentView === "constellation" ? (
-              <ConstellationMap
-                nodes={[]}
-                edges={[]}
-                onNodeClick={(nodeId) => {
-                  if (!selectedModule) {
-                    handleModuleSelect(nodeId);
-                  } else {
-                    setSelectedNode(nodeId);
-                  }
+          {fileViewMode ? (
+            // ── FILE VIEWER PANEL ──
+            <div
+              style={{
+                width: "100%",
+                height: "100%",
+                display: "flex",
+                flexDirection: "column",
+                background: "#0a0e1a",
+                position: "relative",
+              }}
+            >
+              {/* Header with back button */}
+              <div
+                style={{
+                  padding: "16px 20px",
+                  borderBottom: "1px solid rgba(255,255,255,0.06)",
+                  background: "rgba(13,17,23,0.7)",
+                  backdropFilter: "blur(12px)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 16,
+                  position: "sticky",
+                  top: 0,
+                  zIndex: 10,
                 }}
-                selectedNode={selectedNode}
-                onViewChange={setCurrentView}
-                selectedModule={selectedModule}
-                onModuleChange={handleModuleSelect}
-                moduleFileNodes={constellationFileNodes}
-                moduleFileEdges={constellationFileEdges}
-              />
-            ) : (
-              <GameLevelMap
-                levels={levelNodes}
-                onLevelClick={setSelectedNode}
-                selectedLevel={selectedNode}
-                onViewChange={setCurrentView}
-                selectedModule={selectedModule}
-                onModuleChange={handleModuleSelect}
-              />
-            )}
-          </VisualizationContainer>
+              >
+                <button
+                  onClick={handleBackToMap}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    padding: "8px 16px",
+                    background: "rgba(6,182,212,0.12)",
+                    border: "1px solid rgba(6,182,212,0.3)",
+                    borderRadius: 8,
+                    color: "#06b6d4",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    transition: "all 0.2s",
+                  }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.background =
+                      "rgba(6,182,212,0.18)";
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.background =
+                      "rgba(6,182,212,0.12)";
+                  }}
+                >
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M19 12H5M12 19l-7-7 7-7" />
+                  </svg>
+                  Back to Map
+                </button>
+                <div style={{ flex: 1 }}>
+                  <div
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 600,
+                      color: "rgba(255,255,255,0.85)",
+                      fontFamily: "monospace",
+                    }}
+                  >
+                    {selectedFilePath}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: "rgba(255,255,255,0.35)",
+                      marginTop: 2,
+                    }}
+                  >
+                    {selectedModule?.toUpperCase()} module
+                  </div>
+                </div>
+              </div>
+
+              {/* Loading state */}
+              {fileLoading && (
+                <div
+                  style={{
+                    flex: 1,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 16,
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: "50%",
+                      border: "3px solid rgba(6,182,212,0.15)",
+                      borderTop: "3px solid #06b6d4",
+                      animation: "spin 0.8s linear infinite",
+                    }}
+                  />
+                  <div
+                    style={{
+                      color: "#06b6d4",
+                      fontSize: 14,
+                      fontWeight: 600,
+                    }}
+                  >
+                    IBM Bob is analyzing the file...
+                  </div>
+                  <div
+                    style={{
+                      color: "rgba(255,255,255,0.3)",
+                      fontSize: 12,
+                    }}
+                  >
+                    Fetching code and generating explanation
+                  </div>
+                </div>
+              )}
+
+              {/* File content */}
+              {!fileLoading && fileContent && (
+                <div
+                  style={{
+                    flex: 1,
+                    overflow: "auto",
+                    padding: "24px",
+                  }}
+                >
+                  <div
+                    style={{
+                      background: "rgba(13,17,23,0.5)",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      borderRadius: 12,
+                      padding: "20px",
+                      fontFamily: "monospace",
+                      fontSize: 13,
+                      lineHeight: 1.7,
+                      color: "rgba(255,255,255,0.85)",
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                    }}
+                  >
+                    {fileContent}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            // ── NORMAL VISUALIZATION VIEW ──
+            <VisualizationContainer
+              currentView={currentView}
+              onViewChange={setCurrentView}
+              stats={{
+                filesFound: repoFiles.length,
+                criticalPaths: 0,
+                completionPercentage: 0,
+              }}
+              selectedModule={selectedModule}
+            >
+              {currentView === "constellation" ? (
+                <ConstellationMap
+                  nodes={[]}
+                  edges={[]}
+                  onNodeClick={(nodeId) => {
+                    if (!selectedModule) {
+                      // No module selected → clicking a cluster selects that module
+                      handleModuleSelect(nodeId);
+                    } else {
+                      // Module selected → clicking a file node opens file viewer
+                      const clickedNode = moduleFileNodes?.find(
+                        (n) => n.id === nodeId
+                      );
+                      if (clickedNode) {
+                        // Use filePath instead of label for the full path
+                        handleFileNodeClick(clickedNode.filePath);
+                      } else {
+                        setSelectedNode(nodeId);
+                      }
+                    }
+                  }}
+                  selectedNode={selectedNode}
+                  onViewChange={setCurrentView}
+                  selectedModule={selectedModule}
+                  onModuleChange={handleModuleSelect}
+                  moduleFileNodes={constellationFileNodes}
+                  moduleFileEdges={constellationFileEdges}
+                />
+              ) : (
+                <GameLevelMap
+                  levels={levelNodes}
+                  onLevelClick={setSelectedNode}
+                  selectedLevel={selectedNode}
+                  onViewChange={setCurrentView}
+                  selectedModule={selectedModule}
+                  onModuleChange={handleModuleSelect}
+                />
+              )}
+            </VisualizationContainer>
+          )}
         </CenterPanel>
 
         <RightPanel>
@@ -473,4 +699,3 @@ export default function Home() {
   );
 }
 
-// Made with Bob

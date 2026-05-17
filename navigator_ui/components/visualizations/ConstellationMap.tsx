@@ -190,6 +190,7 @@ export default function ConstellationMap({
   const [dragging, setDragging] = useState(false);
   const [dropdown, setDropdown] = useState(false);
   const dragStart = useRef({ x: 0, y: 0, px: 0, py: 0 });
+  const isDragging = useRef(false);
 
   const isModuleView = !!selectedModule;
   const fileNodes = moduleFileNodes ?? [];
@@ -198,6 +199,7 @@ export default function ConstellationMap({
   const onMouseDown = useCallback(
     (e: React.MouseEvent) => {
       setDragging(true);
+      isDragging.current = false;
       dragStart.current = { x: e.clientX, y: e.clientY, px: pan.x, py: pan.y };
     },
     [pan],
@@ -205,9 +207,14 @@ export default function ConstellationMap({
   const onMouseMove = useCallback(
     (e: React.MouseEvent) => {
       if (!dragging) return;
+      const dx = e.clientX - dragStart.current.x;
+      const dy = e.clientY - dragStart.current.y;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+        isDragging.current = true;
+      }
       setPan({
-        x: dragStart.current.px + e.clientX - dragStart.current.x,
-        y: dragStart.current.py + e.clientY - dragStart.current.y,
+        x: dragStart.current.px + dx,
+        y: dragStart.current.py + dy,
       });
     },
     [dragging],
@@ -651,7 +658,11 @@ export default function ConstellationMap({
               {ALL_MODULE_CLUSTERS.map((cluster) => (
                 <g
                   key={cluster.id}
-                  onClick={() => onModuleChange?.(cluster.id)} // ← directly triggers API fetch
+                  onClick={() => {
+                    if (!isDragging.current) {
+                      onModuleChange?.(cluster.id); // ← directly triggers API fetch
+                    }
+                  }}
                   style={{ cursor: "pointer" }}
                 >
                   {/* Large invisible hit area */}
@@ -819,7 +830,11 @@ export default function ConstellationMap({
                 return (
                   <g
                     key={node.id}
-                    onClick={() => onNodeClick(node.id)}
+                    onClick={() => {
+                      if (!isDragging.current) {
+                        onNodeClick(node.id);
+                      }
+                    }}
                     style={{ cursor: "pointer" }}
                   >
                     {(isCurrent || isDone) && (
@@ -982,4 +997,3 @@ export default function ConstellationMap({
   );
 }
 
-// Made with Bob
