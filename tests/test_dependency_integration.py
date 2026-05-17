@@ -281,7 +281,9 @@ class TestPriorityCalculation:
             complexity=0.5,
             centrality=0.7,
             distance_from_entry=2,
-            recommendation="study_later"
+            recommendation="study_later",
+            importance_score=75,
+            architectural_layer="core"
         )
         
         priority = provider._calculate_priority(score)
@@ -291,8 +293,8 @@ class TestPriorityCalculation:
     
     def test_lower_complexity_higher_priority(self, provider):
         """Should give higher priority to lower complexity"""
-        easy_score = DependencyScore("easy.py", 0.2, 0.5, 1, "start_here")
-        hard_score = DependencyScore("hard.py", 0.8, 0.5, 1, "advanced")
+        easy_score = DependencyScore("easy.py", 0.2, 0.5, 1, "start_here", 60, "foundation")
+        hard_score = DependencyScore("hard.py", 0.8, 0.5, 1, "advanced", 85, "core")
         
         easy_priority = provider._calculate_priority(easy_score)
         hard_priority = provider._calculate_priority(hard_score)
@@ -302,8 +304,8 @@ class TestPriorityCalculation:
     
     def test_higher_centrality_higher_priority(self, provider):
         """Should give higher priority to more central files"""
-        central_score = DependencyScore("central.py", 0.5, 0.9, 1, "study_later")
-        peripheral_score = DependencyScore("peripheral.py", 0.5, 0.1, 1, "study_later")
+        central_score = DependencyScore("central.py", 0.5, 0.9, 1, "study_later", 80, "core")
+        peripheral_score = DependencyScore("peripheral.py", 0.5, 0.1, 1, "study_later", 50, "utility")
         
         central_priority = provider._calculate_priority(central_score)
         peripheral_priority = provider._calculate_priority(peripheral_score)
@@ -313,8 +315,8 @@ class TestPriorityCalculation:
     
     def test_closer_to_entry_higher_priority(self, provider):
         """Should give higher priority to files closer to entry"""
-        close_score = DependencyScore("close.py", 0.5, 0.5, 1, "study_later")
-        far_score = DependencyScore("far.py", 0.5, 0.5, 5, "advanced")
+        close_score = DependencyScore("close.py", 0.5, 0.5, 1, "study_later", 70, "frontend")
+        far_score = DependencyScore("far.py", 0.5, 0.5, 5, "advanced", 65, "backend")
         
         close_priority = provider._calculate_priority(close_score)
         far_priority = provider._calculate_priority(far_score)

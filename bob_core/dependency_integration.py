@@ -1,37 +1,93 @@
 """
 Dependency Integration Service
-Integrates Karl's dependency graph scores into Bob's context
+Integrates engine layer (parser, metrics, dependency_intelligence) with bob_core layer
+Provides a unified interface for accessing dependency analysis results
 """
 
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
+from engine.dependency_intelligence import build_dependency_intelligence, DependencyIntelligencePayload
+from bob_core.schemas import DependencyNode
 
 
 @dataclass
 class DependencyScore:
-    """Dependency score information from Karl's service"""
+    """Dependency score information from engine layer"""
     file_path: str
-    complexity: float  # 0-1 scale
-    centrality: float  # 0-1 scale (how many files depend on it)
-    distance_from_entry: int  # hops from main.py
+    complexity: float  # 0-1 scale (normalized from 0-100)
+    centrality: float  # 0-1 scale (based on incoming dependencies)
+    distance_from_entry: int  # dependency radius
     recommendation: str  # "start_here" | "study_later" | "advanced"
+    importance_score: int  # 0-100 scale
+    architectural_layer: str
 
 
 class DependencyScoreProvider:
     """
-    Interface to Karl's dependency graph service
-    Provides complexity and centrality scores for files
+    Interface to engine layer dependency intelligence
+    Provides complexity and centrality scores for files using real analysis
     """
     
-    def __init__(self, use_mock: bool = True):
+    def __init__(self, repo_path: Optional[str] = None, use_mock: bool = False):
         """
         Initialize dependency score provider
         
         Args:
-            use_mock: If True, use mock data. Set to False when Karl's service is ready.
+            repo_path: Path to repository for real analysis
+            use_mock: If True, use mock data. If False, use engine layer analysis.
         """
         self.use_mock = use_mock
+        self.repo_path = repo_path
         self._cache: Dict[str, DependencyScore] = {}
+        self._intelligence: Optional[DependencyIntelligencePayload] = None
+        
+        # Load real intelligence if repo_path provided and not using mock
+        if repo_path and not use_mock:
+            self._load_intelligence()
+    
+    def _load_intelligence(self):
+        """Load dependency intelligence from engine layer"""
+        if not self.repo_path:
+            return
+        
+        try:
+            self._intelligence = build_dependency_intelligence(self.repo_path, include_tests=False)
+            
+            # Pre-populate cache with real data
+            for node in self._intelligence.nodes:
+                score = self._node_to_score(node)
+                self._cache[node.file] = score
+                
+        except Exception as e:
+            print(f"Warning: Failed to load dependency intelligence: {e}")
+            self._intelligence = None
+    
+    def _node_to_score(self, node: DependencyNode) -> DependencyScore:
+        """Convert DependencyNode to DependencyScore"""
+        # Normalize complexity to 0-1 scale
+        complexity = node.complexity_score / 100.0
+        
+        # Calculate centrality based on incoming dependencies
+        # Normalize to 0-1 scale (assume max 20 incoming deps)
+        centrality = min(node.incoming_dependency_count / 20.0, 1.0)
+        
+        # Determine recommendation based on scores
+        if complexity < 0.33 and node.architectural_layer in ["Foundation", "Configuration", "Data Model"]:
+            recommendation = "start_here"
+        elif complexity < 0.67:
+            recommendation = "study_later"
+        else:
+            recommendation = "advanced"
+        
+        return DependencyScore(
+            file_path=node.file,
+            complexity=complexity,
+            centrality=centrality,
+            distance_from_entry=node.dependency_radius,
+            recommendation=recommendation,
+            importance_score=node.importance_score,
+            architectural_layer=node.architectural_layer
+        )
     
     def get_file_score(self, file_path: str) -> Optional[DependencyScore]:
         """
@@ -50,7 +106,15 @@ class DependencyScoreProvider:
         if self.use_mock:
             score = self._get_mock_score(file_path)
         else:
-            score = self._fetch_from_karl_service(file_path)
+            # Use real intelligence from engine layer
+            if self._intelligence:
+                node = next((n for n in self._intelligence.nodes if n.file == file_path), None)
+                if node:
+                    score = self._node_to_score(node)
+                else:
+                    score = None
+            else:
+                score = None
         
         # Cache the result
         if score:
@@ -250,38 +314,35 @@ class DependencyScoreProvider:
             complexity=complexity,
             centrality=centrality,
             distance_from_entry=distance,
-            recommendation=recommendation
+            recommendation=recommendation,
+            importance_score=int(centrality * 100),
+            architectural_layer="Application Logic"
         )
     
-    def _fetch_from_karl_service(self, file_path: str) -> Optional[DependencyScore]:
+    def get_intelligence_payload(self) -> Optional[DependencyIntelligencePayload]:
         """
-        Fetch dependency score from Karl's service
-        
-        Args:
-            file_path: Path to the file
+        Get the complete dependency intelligence payload
         
         Returns:
-            DependencyScore object or None if service unavailable
+            DependencyIntelligencePayload or None if not loaded
         """
-        # TODO: Implement actual API call to Karl's service
-        # For now, return None to indicate service not ready
+        return self._intelligence
+    
+    def reload_intelligence(self, repo_path: Optional[str] = None):
+        """
+        Reload dependency intelligence from engine layer
         
-        # Example implementation when Karl's service is ready:
-        # try:
-        #     response = requests.get(f"{KARL_SERVICE_URL}/scores/{file_path}")
-        #     if response.status_code == 200:
-        #         data = response.json()
-        #         return DependencyScore(
-        #             file_path=file_path,
-        #             complexity=data["complexity"],
-        #             centrality=data["centrality"],
-        #             distance_from_entry=data["distance_from_entry"],
-        #             recommendation=data["recommendation"]
-        #         )
-        # except Exception as e:
-        #     print(f"Failed to fetch score from Karl's service: {e}")
+        Args:
+            repo_path: Optional new repository path
+        """
+        if repo_path:
+            self.repo_path = repo_path
         
-        return None
+        self._cache.clear()
+        self._intelligence = None
+        
+        if self.repo_path and not self.use_mock:
+            self._load_intelligence()
     
     def clear_cache(self):
         """Clear the score cache"""

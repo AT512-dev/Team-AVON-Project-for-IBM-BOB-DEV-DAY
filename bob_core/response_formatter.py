@@ -280,4 +280,25 @@ def format_error_response(error_message: str, query_type: str = "general") -> Di
         "error": True
     }
 
+
+def format_compass_response(
+    orchestration_result: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Format orchestration result into exact JSON structure for frontend
+    
+    Args:
+        orchestration_result: Result from CompassOrchestrator
+        
+    Returns:
+        Formatted response matching frontend requirements
+    """
+    return {
+        "status": orchestration_result.get("status", "success"),
+        "dependency_radius_score": orchestration_result.get("dependency_radius_score", 0.0),
+        "learning_roadmap": orchestration_result.get("learning_roadmap", []),
+        "constellation_graph": orchestration_result.get("constellation_graph", {"nodes": [], "edges": []}),
+        "summary": orchestration_result.get("summary", {})
+    }
+
 # Made with Bob

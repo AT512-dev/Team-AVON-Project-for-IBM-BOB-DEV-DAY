@@ -10,7 +10,8 @@ from bob_core.schemas import OnboardPayload, RoadmapStep
 from bob_core.bob_service import generate_explanation, generate_checkpoint_quiz
 from bob_core.context_service import ContextRetriever
 from bob_core.prompts import build_mentor_prompt, classify_query
-from bob_core.response_formatter import format_mentor_response, format_error_response
+from bob_core.response_formatter import format_mentor_response, format_error_response, format_compass_response
+from bob_core.orchestration import CompassOrchestrator
 from engine.parser import parse_repository
 from engine.metrics import compute_complexity
 
@@ -19,6 +20,12 @@ app = FastAPI(title="Compass AI", version="1.0.0")
 class OnboardRequest(BaseModel):
     repo_path: str
     task_description: Optional[str] = "Understand the codebase architecture"
+
+class CompassAnalysisRequest(BaseModel):
+    repo_path: str
+    task_description: Optional[str] = "Understand the codebase architecture"
+    max_roadmap_files: Optional[int] = 10
+    include_tests: Optional[bool] = False
 
 class AskRequest(BaseModel):
     repo_path: str
@@ -63,6 +70,82 @@ async def generate_roadmap(request: OnboardRequest):
         quiz = {"questions": []}
 
     return OnboardPayload(roadmap=roadmap_steps, quiz=quiz)
+
+@app.post("/api/v1/compass/analyze")
+async def analyze_repository_compass(request: CompassAnalysisRequest):
+    """
+    Complete Compass AI Analysis Endpoint
+    
+    This is the main endpoint that orchestrates the complete workflow:
+    1. Parse repository using engine/parser.py
+    2. Calculate dependency intelligence using engine/dependency_intelligence.py
+    3. Generate learning roadmap with Bob's AI explanations
+    4. Create constellation graph for visualization
+    5. Return formatted JSON for frontend
+    
+    Returns JSON structure:
+    {
+        "status": "success",
+        "dependency_radius_score": 8.5,
+        "learning_roadmap": [
+            {
+                "step": 1,
+                "file_path": "src/config/database.js",
+                "dependencies_count": 14,
+                "priority": "critical",
+                "bob_explanation": "...",
+                "architectural_layer": "Database Layer",
+                "complexity_score": 75,
+                "dependency_radius": 2
+            }
+        ],
+        "constellation_graph": {
+            "nodes": [{"id": "...", "label": "...", "group": "..."}],
+            "edges": [{"from": "...", "to": "...", "relationship": "imports"}]
+        },
+        "summary": {
+            "total_files": 45,
+            "total_dependencies": 120,
+            "circular_dependencies": 2,
+            "architectural_layers": {...},
+            "foundational_files": [...],
+            "hub_files": [...],
+            "risky_files": [...]
+        }
+    }
+    """
+    try:
+        # Validate repository path
+        if not os.path.isdir(request.repo_path):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Repository path does not exist: {request.repo_path}"
+            )
+        
+        # Initialize orchestrator
+        orchestrator = CompassOrchestrator(
+            repo_path=request.repo_path,
+            include_tests=request.include_tests or False
+        )
+        
+        # Run complete analysis
+        result = await orchestrator.generate_complete_analysis(
+            max_roadmap_files=request.max_roadmap_files or 10,
+            task_description=request.task_description or "Understand the codebase architecture"
+        )
+        
+        # Format response for frontend
+        formatted_response = format_compass_response(result)
+        
+        return formatted_response
+        
+    except ValueError as ve:
+        raise HTTPException(status_code=422, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Analysis failed: {str(e)}"
+        )
 
 @app.get("/health")
 async def health_check():
