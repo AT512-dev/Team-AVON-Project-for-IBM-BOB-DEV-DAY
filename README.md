@@ -9,7 +9,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green)](https://fastapi.tiangolo.com/)
 [![IBM WatsonX](https://img.shields.io/badge/IBM-WatsonX-blue)](https://www.ibm.com/watsonx)
 [![Code Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)](./TEST_RESULTS.md)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 
 [Features](#-key-features) • [Quick Start](#-quick-start) • [Documentation](#-related-documentation) • [Contributing](CONTRIBUTING.md)
 
