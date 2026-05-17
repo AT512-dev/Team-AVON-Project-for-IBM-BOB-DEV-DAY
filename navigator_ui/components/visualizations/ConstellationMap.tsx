@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useCallback } from "react";
 import { ConstellationMapProps, ViewType } from "@/types";
+import { UIFileNode, UIFileEdge } from "@/lib/api";
 
 const ALL_MODULE_CLUSTERS = [
   {
@@ -146,41 +147,6 @@ const CLUSTER_LINES = [
   { from: "database", to: "payments" },
 ];
 
-const AUTH_FILE_NODES = [
-  { id: "jwt", label: "jwt.ts", x: 260, y: 160, status: "done" },
-  { id: "login", label: "login.ts", x: 400, y: 200, status: "done" },
-  { id: "session", label: "session.ts", x: 210, y: 295, status: "done" },
-  {
-    id: "middleware",
-    label: "middleware.ts",
-    x: 340,
-    y: 340,
-    status: "current",
-  },
-  { id: "password", label: "password.ts", x: 430, y: 410, status: "locked" },
-  { id: "oauth", label: "oauth.ts", x: 280, y: 470, status: "locked" },
-  { id: "refresh", label: "refresh.ts", x: 430, y: 510, status: "locked" },
-  { id: "audit", label: "audit.ts", x: 490, y: 160, status: "locked" },
-  {
-    id: "permissions",
-    label: "permissions.ts",
-    x: 140,
-    y: 220,
-    status: "locked",
-  },
-  { id: "tokens", label: "tokens.ts", x: 530, y: 330, status: "locked" },
-  { id: "signup", label: "signup.ts", x: 170, y: 530, status: "locked" },
-  { id: "recovery", label: "recovery.ts", x: 490, y: 560, status: "locked" },
-];
-
-const AUTH_FILE_EDGES = [
-  { from: "jwt", to: "middleware" },
-  { from: "login", to: "middleware" },
-  { from: "session", to: "middleware" },
-  { from: "jwt", to: "login" },
-  { from: "login", to: "session" },
-];
-
 const BG_STARS = Array.from({ length: 55 }, (_, i) => ({
   x: ((i * 137 + 50) % 780) + 20,
   y: ((i * 97 + 30) % 580) + 20,
@@ -206,6 +172,8 @@ interface Props extends ConstellationMapProps {
   onViewChange?: (view: ViewType) => void;
   selectedModule?: string | null;
   onModuleChange?: (moduleId: string | null) => void;
+  moduleFileNodes?: UIFileNode[];
+  moduleFileEdges?: UIFileEdge[];
 }
 
 export default function ConstellationMap({
@@ -214,6 +182,8 @@ export default function ConstellationMap({
   onViewChange,
   selectedModule,
   onModuleChange,
+  moduleFileNodes,
+  moduleFileEdges,
 }: Props) {
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -222,6 +192,8 @@ export default function ConstellationMap({
   const dragStart = useRef({ x: 0, y: 0, px: 0, py: 0 });
 
   const isModuleView = !!selectedModule;
+  const fileNodes = moduleFileNodes ?? [];
+  const fileEdges = moduleFileEdges ?? [];
 
   const onMouseDown = useCallback(
     (e: React.MouseEvent) => {
@@ -277,7 +249,6 @@ export default function ConstellationMap({
       onMouseLeave={onMouseUp}
       onWheel={onWheel}
     >
-      {/* Ambient glows */}
       <div
         style={{
           position: "absolute",
@@ -305,7 +276,7 @@ export default function ConstellationMap({
         }}
       />
 
-      {/* ── TOP BAR ── */}
+      {/* TOP BAR */}
       <div
         style={{
           position: "absolute",
@@ -320,7 +291,7 @@ export default function ConstellationMap({
           pointerEvents: "none",
         }}
       >
-        {/* LEFT — dropdown */}
+        {/* Dropdown */}
         <div style={{ position: "relative", pointerEvents: "all" }}>
           <button
             onClick={() => setDropdown((v) => !v)}
@@ -349,7 +320,6 @@ export default function ConstellationMap({
               />
             </svg>
           </button>
-
           {dropdown && (
             <div
               style={{
@@ -368,7 +338,7 @@ export default function ConstellationMap({
             >
               {dropdownItems.map((item) => {
                 const isActive = item.id === selectedModule;
-                const isAllModules = item.id === null;
+                const isAll = item.id === null;
                 return (
                   <button
                     key={item.label}
@@ -376,23 +346,23 @@ export default function ConstellationMap({
                     style={{
                       width: "100%",
                       display: "block",
-                      padding: isAllModules ? "9px 16px 8px" : "8px 16px",
+                      padding: isAll ? "9px 16px 8px" : "8px 16px",
                       background: "transparent",
                       border: "none",
-                      borderBottom: isAllModules
+                      borderBottom: isAll
                         ? "1px solid rgba(255,255,255,0.07)"
                         : "none",
-                      color: isAllModules
+                      color: isAll
                         ? "rgba(255,255,255,0.4)"
                         : isActive
                           ? "#06b6d4"
                           : "rgba(255,255,255,0.7)",
-                      fontSize: isAllModules ? 11 : 12,
+                      fontSize: isAll ? 11 : 12,
                       fontWeight: isActive ? 600 : 400,
                       cursor: "pointer",
                       textAlign: "left",
                       fontFamily: "inherit",
-                      letterSpacing: isAllModules ? "0.02em" : "0.05em",
+                      letterSpacing: isAll ? "0.02em" : "0.05em",
                     }}
                     onMouseEnter={(e) => {
                       (e.currentTarget as HTMLButtonElement).style.background =
@@ -403,7 +373,7 @@ export default function ConstellationMap({
                         "transparent";
                     }}
                   >
-                    {isActive && !isAllModules && (
+                    {isActive && !isAll && (
                       <span style={{ color: "#06b6d4", marginRight: 6 }}>
                         ✓
                       </span>
@@ -416,7 +386,7 @@ export default function ConstellationMap({
           )}
         </div>
 
-        {/* CENTER — toggle */}
+        {/* Toggle */}
         <div
           style={{
             display: "flex",
@@ -511,18 +481,17 @@ export default function ConstellationMap({
           </button>
         </div>
 
-        {/* ── RIGHT — progress card on top, zoom buttons below (stacked vertically) ── */}
+        {/* Right: progress + zoom */}
         <div
           style={{
             display: "flex",
-            flexDirection: "column", // ← stacked vertically
+            flexDirection: "column",
             alignItems: "flex-end",
             gap: 8,
             pointerEvents: "all",
           }}
         >
-          {/* Progress card — only when a module is selected */}
-          {isModuleView && (
+          {isModuleView && fileNodes.length > 0 && (
             <div
               style={{
                 background: "rgba(255,255,255,0.05)",
@@ -538,7 +507,8 @@ export default function ConstellationMap({
                 <span
                   style={{ color: "rgba(255,255,255,0.85)", fontWeight: 600 }}
                 >
-                  3 / 12 files
+                  {fileNodes.filter((n) => n.status === "done").length} /{" "}
+                  {fileNodes.length} files
                 </span>
               </div>
               <div
@@ -560,7 +530,7 @@ export default function ConstellationMap({
                 >
                   <div
                     style={{
-                      width: "25%",
+                      width: `${Math.round((fileNodes.filter((n) => n.status === "done").length / fileNodes.length) * 100)}%`,
                       height: "100%",
                       background: "#10b981",
                       borderRadius: 99,
@@ -570,13 +540,16 @@ export default function ConstellationMap({
                 <span
                   style={{ fontSize: 11, fontWeight: 700, color: "#10b981" }}
                 >
-                  25%
+                  {Math.round(
+                    (fileNodes.filter((n) => n.status === "done").length /
+                      fileNodes.length) *
+                      100,
+                  )}
+                  %
                 </span>
               </div>
             </div>
           )}
-
-          {/* Zoom buttons — always visible, stacked horizontally as a group */}
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             {[
               { l: "+", a: () => setZoom((z) => Math.min(3, z + 0.2)) },
@@ -614,7 +587,7 @@ export default function ConstellationMap({
         </div>
       </div>
 
-      {/* ── SVG CANVAS ── */}
+      {/* SVG */}
       <svg
         width="100%"
         height="100%"
@@ -657,7 +630,7 @@ export default function ConstellationMap({
             />
           ))}
 
-          {/* ALL MODULES */}
+          {/* ── ALL MODULES VIEW ── */}
           {!isModuleView && (
             <>
               {CLUSTER_LINES.map(({ from, to }) => {
@@ -678,9 +651,16 @@ export default function ConstellationMap({
               {ALL_MODULE_CLUSTERS.map((cluster) => (
                 <g
                   key={cluster.id}
-                  onClick={() => onNodeClick(cluster.id)}
+                  onClick={() => onModuleChange?.(cluster.id)} // ← directly triggers API fetch
                   style={{ cursor: "pointer" }}
                 >
+                  {/* Large invisible hit area */}
+                  <circle
+                    cx={cluster.cx}
+                    cy={cluster.cy}
+                    r={70}
+                    fill="transparent"
+                  />
                   {cluster.isHere && (
                     <circle
                       cx={cluster.cx}
@@ -768,7 +748,7 @@ export default function ConstellationMap({
             </>
           )}
 
-          {/* SPECIFIC MODULE */}
+          {/* ── MODULE VIEW — real API file nodes ── */}
           {isModuleView && (
             <>
               <text
@@ -783,16 +763,31 @@ export default function ConstellationMap({
               >
                 {selectedModule!.toUpperCase().split("").join(" ")}
               </text>
-              {AUTH_FILE_EDGES.map(({ from, to }) => {
-                const a = AUTH_FILE_NODES.find((n) => n.id === from)!;
-                const b = AUTH_FILE_NODES.find((n) => n.id === to)!;
+
+              {fileNodes.length === 0 && (
+                <text
+                  x="390"
+                  y="350"
+                  textAnchor="middle"
+                  fontSize="13"
+                  fill="rgba(255,255,255,0.2)"
+                  fontFamily="inherit"
+                >
+                  No files loaded yet
+                </text>
+              )}
+
+              {fileEdges.map(({ from, to }, idx) => {
+                const a = fileNodes.find((n) => n.id === from);
+                const b = fileNodes.find((n) => n.id === to);
+                if (!a || !b) return null;
                 const colored =
                   (a.status === "done" && b.status === "done") ||
                   a.status === "current" ||
                   b.status === "current";
                 return (
                   <line
-                    key={`${from}-${to}`}
+                    key={idx}
                     x1={a.x}
                     y1={a.y}
                     x2={b.x}
@@ -806,7 +801,8 @@ export default function ConstellationMap({
                   />
                 );
               })}
-              {AUTH_FILE_NODES.map((node) => {
+
+              {fileNodes.map((node) => {
                 const isCurrent = node.status === "current";
                 const isDone = node.status === "done";
                 const r = isCurrent ? 26 : isDone ? 22 : 5;
@@ -929,7 +925,7 @@ export default function ConstellationMap({
         </g>
       </svg>
 
-      {/* Key legend */}
+      {/* Key */}
       {!isModuleView && (
         <div
           style={{

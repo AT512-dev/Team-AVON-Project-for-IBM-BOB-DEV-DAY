@@ -1,4 +1,5 @@
 // Compass AI - TypeScript Type Definitions
+import type { UIFileNode, UIFileEdge } from "@/lib/api";
 
 export interface FileNode {
   id: string;
@@ -50,7 +51,6 @@ export interface LevelNode {
 
 export type MessageSender = "user" | "bob";
 export type BobStatusType = "active" | "idle" | "thinking";
-
 export interface CodeBlock {
   language: string;
   code: string;
@@ -92,6 +92,7 @@ export interface FileTreeProps {
   onFileSelect: (fileId: string) => void;
 }
 
+// Simplified — container is now just a pass-through wrapper
 export interface VisualizationContainerProps {
   currentView: ViewType;
   onViewChange: (view: ViewType) => void;
@@ -107,6 +108,8 @@ export interface ConstellationMapProps {
   onViewChange?: (view: ViewType) => void;
   selectedModule?: string | null;
   onModuleChange?: (moduleId: string | null) => void;
+  moduleFileNodes?: UIFileNode[];
+  moduleFileEdges?: UIFileEdge[];
 }
 
 export interface GameLevelMapProps {
