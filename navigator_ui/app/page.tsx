@@ -10,6 +10,7 @@ import VisualizationContainer from "@/components/visualizations/VisualizationCon
 import ConstellationMap from "@/components/visualizations/ConstellationMap";
 import GameLevelMap from "@/components/visualizations/GameLevelMap";
 import BobChatPanel from "@/components/chat/BobChatPanel";
+import FileDetailView from "@/components/visualizations/FileDetailView";
 import {
   checkHealth,
   fetchInitialRoadmap,
@@ -25,6 +26,24 @@ import { Module } from "@/components/layout/LeftPanelModules";
 
 const DEMO_REPO_URL =
   "https://github.com/AleyJan/vision-intelligence---techmesh-26";
+
+// Define a local interface matching what ConstellationMap expects
+interface ConstellationEdge {
+  id: string;
+  source: string;
+  target: string;
+  type?: string;
+}
+
+// Helper to map UIFileEdge[] → ConstellationEdge[]
+function mapEdges(edges: UIFileEdge[]): ConstellationEdge[] {
+  return edges.map((edge) => ({
+    id: `e_${edge.from}_to_${edge.to}`,
+    source: edge.from,
+    target: edge.to,
+    type: "smoothstep",
+  }));
+}
 
 export default function Home() {
   // ── Gate ──────────────────────────────────────────────────────────────────
@@ -49,6 +68,9 @@ export default function Home() {
     null,
   );
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  // ── File/Folder detail view ───────────────────────────────────────────────
+  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
 
   // ── Fetch initial roadmap when connected ──────────────────────────────────
   useEffect(() => {
@@ -89,7 +111,6 @@ export default function Home() {
   }, [isLoading, initialLoading]);
 
   // ── Build dynamic modules from real file list ─────────────────────────────
-  // Groups files by their top-level folder → shows as modules in sidebar
   const dynamicModules: Module[] | null =
     repoFiles.length > 0
       ? (() => {
@@ -119,13 +140,13 @@ export default function Home() {
         })()
       : null;
 
-  // Use real modules if available, otherwise fall back to mock
   const sidebarModules = dynamicModules ?? mockModules;
 
   // ── Module select → fetch module-specific roadmap ─────────────────────────
   const handleModuleSelect = useCallback(async (moduleId: string | null) => {
     setSelectedModule(moduleId);
     setSelectedNode(null);
+    setSelectedFilePath(null); // clear detail view when switching modules
     setModuleFileNodes(null);
     setModuleFileEdges(null);
     setFetchError(null);
@@ -195,25 +216,19 @@ export default function Home() {
         }))
       : null;
 
-  // What to show in level map:
-  // - Module selected → module-specific data
-  // - No module → initial real data if loaded, else mock
   const levelNodes = selectedModule
     ? (levelNodesFromModule ?? [])
     : (levelNodesFromInitial ?? mockLevelNodes);
 
-  // Constellation nodes:
-  // - Module selected → module file nodes
-  // - No module → initial real nodes if loaded, else nothing (uses cluster view)
   const constellationFileNodes = selectedModule
-    ? (moduleFileNodes ?? undefined)
-    : (initialNodes ?? undefined);
+    ? (moduleFileNodes ?? [])
+    : (initialNodes ?? []);
 
-  const constellationFileEdges = selectedModule
-    ? (moduleFileEdges ?? undefined)
-    : (initialEdges ?? undefined);
+  // ── Map UIFileEdge[] → ConstellationEdge[] for both contexts ─────────────
+  const constellationFileEdges: ConstellationEdge[] = mapEdges(
+    selectedModule ? (moduleFileEdges ?? []) : (initialEdges ?? []),
+  );
 
-  // ── Landing gate ──────────────────────────────────────────────────────────
   if (!connected) {
     return (
       <LandingPage
@@ -227,10 +242,8 @@ export default function Home() {
     );
   }
 
-  // ── Dashboard ─────────────────────────────────────────────────────────────
   return (
     <DashboardLayout>
-      {/* Initial loading overlay — shown while fetching repo on first load */}
       {initialLoading && (
         <div
           style={{
@@ -302,7 +315,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* Module loading overlay */}
       {isLoading && (
         <div
           style={{
@@ -361,7 +373,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* Error toast */}
       {fetchError && !isLoading && (
         <div
           style={{
@@ -402,12 +413,17 @@ export default function Home() {
 
       <div className="flex-1 flex overflow-hidden">
         <LeftPanelModules
+          repoFiles={repoFiles.map((file) => ({
+            ...file,
+            path: file.path,
+          }))}
           modules={sidebarModules}
           selectedModule={selectedModule}
           onModuleSelect={handleModuleSelect}
-          totalFiles={repoFiles.length || moduleFileNodes?.length || 0}
+          totalFiles={repoFiles.length || constellationFileNodes?.length || 0}
           completedFiles={
-            moduleFileNodes?.filter((n) => n.status === "done").length ?? 0
+            constellationFileNodes?.filter((n) => n.status === "done").length ??
+            0
           }
           userName="Ali Jan"
           userInitials="AJ"
@@ -416,45 +432,68 @@ export default function Home() {
         />
 
         <CenterPanel>
-          <VisualizationContainer
-            currentView={currentView}
-            onViewChange={setCurrentView}
-            stats={{
-              filesFound: repoFiles.length,
-              criticalPaths: 0,
-              completionPercentage: 0,
-            }}
-            selectedModule={selectedModule}
-          >
-            {currentView === "constellation" ? (
-              <ConstellationMap
-                nodes={[]}
-                edges={[]}
-                onNodeClick={(nodeId) => {
-                  if (!selectedModule) {
-                    handleModuleSelect(nodeId);
-                  } else {
+          {selectedFilePath ? (
+            <FileDetailView
+              selectedPath={selectedFilePath}
+              repoFiles={repoFiles}
+              onClose={() => {
+                setSelectedFilePath(null);
+                setSelectedNode(null); // keep both in sync on close
+              }}
+              onFileSelect={setSelectedFilePath}
+              moduleContext={selectedModule}
+            />
+          ) : (
+            <VisualizationContainer
+              currentView={currentView}
+              onViewChange={setCurrentView}
+              stats={{
+                filesFound: repoFiles.length,
+                criticalPaths: 0,
+                completionPercentage: 0,
+              }}
+              selectedModule={selectedModule}
+            >
+              {currentView === "constellation" ? (
+                <ConstellationMap
+                  nodes={constellationFileNodes}
+                  edges={constellationFileEdges}
+                  onNodeClick={(nodeId) => {
+                    if (!selectedModule) {
+                      // Top-level: clicking a cluster star drills into that module
+                      handleModuleSelect(nodeId);
+                    } else {
+                      // Module view: clicking a file star opens FileDetailView
+                      setSelectedNode(nodeId);
+                      setSelectedFilePath(nodeId); // ← THE FIX
+                    }
+                  }}
+                  selectedNode={selectedNode}
+                  onViewChange={setCurrentView}
+                  selectedModule={selectedModule}
+                  onModuleChange={handleModuleSelect}
+                  moduleFileNodes={constellationFileNodes}
+                  moduleFileEdges={constellationFileEdges}
+                  availableModules={sidebarModules.map((m) => ({
+                    id: m.id,
+                    name: m.name,
+                  }))}
+                />
+              ) : (
+                <GameLevelMap
+                  levels={levelNodes}
+                  onLevelClick={(nodeId) => {
                     setSelectedNode(nodeId);
-                  }
-                }}
-                selectedNode={selectedNode}
-                onViewChange={setCurrentView}
-                selectedModule={selectedModule}
-                onModuleChange={handleModuleSelect}
-                moduleFileNodes={constellationFileNodes}
-                moduleFileEdges={constellationFileEdges}
-              />
-            ) : (
-              <GameLevelMap
-                levels={levelNodes}
-                onLevelClick={setSelectedNode}
-                selectedLevel={selectedNode}
-                onViewChange={setCurrentView}
-                selectedModule={selectedModule}
-                onModuleChange={handleModuleSelect}
-              />
-            )}
-          </VisualizationContainer>
+                    setSelectedFilePath(nodeId); // also wire level map clicks
+                  }}
+                  selectedLevel={selectedNode}
+                  onViewChange={setCurrentView}
+                  selectedModule={selectedModule}
+                  onModuleChange={handleModuleSelect}
+                />
+              )}
+            </VisualizationContainer>
+          )}
         </CenterPanel>
 
         <RightPanel>
@@ -472,5 +511,3 @@ export default function Home() {
     </DashboardLayout>
   );
 }
-
-// Made with Bob

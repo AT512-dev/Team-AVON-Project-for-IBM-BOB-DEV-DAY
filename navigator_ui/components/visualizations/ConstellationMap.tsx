@@ -1,8 +1,8 @@
 "use client";
 
 import React, { useState, useRef, useCallback } from "react";
-import { ConstellationMapProps, ViewType } from "@/types";
-import { UIFileNode, UIFileEdge } from "@/lib/api";
+import { ConstellationMapProps, ConstellationEdge, ViewType } from "@/types";
+import { UIFileNode } from "@/lib/api";
 
 const ALL_MODULE_CLUSTERS = [
   {
@@ -168,12 +168,14 @@ function getClusterCenter(id: string) {
   return c ? { x: c.cx, y: c.cy } : { x: 0, y: 0 };
 }
 
+// ✅ moduleFileEdges now uses ConstellationEdge[] (not UIFileEdge[])
 interface Props extends ConstellationMapProps {
   onViewChange?: (view: ViewType) => void;
   selectedModule?: string | null;
   onModuleChange?: (moduleId: string | null) => void;
   moduleFileNodes?: UIFileNode[];
-  moduleFileEdges?: UIFileEdge[];
+  moduleFileEdges?: ConstellationEdge[];
+  availableModules?: Array<{ id: string; name: string }>;
 }
 
 export default function ConstellationMap({
@@ -184,6 +186,7 @@ export default function ConstellationMap({
   onModuleChange,
   moduleFileNodes,
   moduleFileEdges,
+  availableModules,
 }: Props) {
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -192,8 +195,9 @@ export default function ConstellationMap({
   const dragStart = useRef({ x: 0, y: 0, px: 0, py: 0 });
 
   const isModuleView = !!selectedModule;
-  const fileNodes = moduleFileNodes ?? [];
-  const fileEdges = moduleFileEdges ?? [];
+  const fileNodes: UIFileNode[] = (moduleFileNodes as UIFileNode[]) ?? [];
+  // ✅ fileEdges uses ConstellationEdge shape (source/target, not from/to)
+  const fileEdges: ConstellationEdge[] = moduleFileEdges ?? [];
 
   const onMouseDown = useCallback(
     (e: React.MouseEvent) => {
@@ -223,13 +227,19 @@ export default function ConstellationMap({
     setDropdown(false);
   };
 
+  // Use real modules if available, fallback to hardcoded MODULES
+  const modulesData =
+    availableModules && availableModules.length > 0
+      ? availableModules.map((m) => ({ id: m.id, label: m.name }))
+      : MODULES;
+
   const dropdownLabel = isModuleView
-    ? (MODULES.find((m) => m.id === selectedModule)?.label ?? "All modules")
+    ? (modulesData.find((m) => m.id === selectedModule)?.label ?? "All modules")
     : "All modules";
 
   const dropdownItems: { id: string | null; label: string }[] = isModuleView
-    ? [{ id: null, label: "All modules" }, ...MODULES]
-    : MODULES.map((m) => ({ id: m.id, label: m.label }));
+    ? [{ id: null, label: "All modules" }, ...modulesData]
+    : modulesData.map((m) => ({ id: m.id, label: m.label }));
 
   return (
     <div
@@ -631,7 +641,7 @@ export default function ConstellationMap({
           ))}
 
           {/* ── ALL MODULES VIEW ── */}
-          {!isModuleView && (
+          {!isModuleView && fileNodes.length === 0 && (
             <>
               {CLUSTER_LINES.map(({ from, to }) => {
                 const a = getClusterCenter(from),
@@ -651,10 +661,9 @@ export default function ConstellationMap({
               {ALL_MODULE_CLUSTERS.map((cluster) => (
                 <g
                   key={cluster.id}
-                  onClick={() => onModuleChange?.(cluster.id)} // ← directly triggers API fetch
+                  onClick={() => onModuleChange?.(cluster.id)}
                   style={{ cursor: "pointer" }}
                 >
-                  {/* Large invisible hit area */}
                   <circle
                     cx={cluster.cx}
                     cy={cluster.cy}
@@ -748,38 +757,42 @@ export default function ConstellationMap({
             </>
           )}
 
-          {/* ── MODULE VIEW — real API file nodes ── */}
-          {isModuleView && (
+          {/* ── REAL DATA VIEW (both overview and module-specific) ── */}
+          {fileNodes.length > 0 && (
             <>
-              <text
-                x="390"
-                y="88"
-                textAnchor="middle"
-                fontSize="13"
-                fontWeight="700"
-                letterSpacing="10"
-                fill="rgba(6,182,212,0.65)"
-                fontFamily="inherit"
-              >
-                {selectedModule!.toUpperCase().split("").join(" ")}
-              </text>
-
-              {fileNodes.length === 0 && (
+              {isModuleView && (
                 <text
                   x="390"
-                  y="350"
+                  y="88"
                   textAnchor="middle"
                   fontSize="13"
-                  fill="rgba(255,255,255,0.2)"
+                  fontWeight="700"
+                  letterSpacing="10"
+                  fill="rgba(6,182,212,0.65)"
                   fontFamily="inherit"
                 >
-                  No files loaded yet
+                  {selectedModule!.toUpperCase().split("").join(" ")}
+                </text>
+              )}
+              {!isModuleView && (
+                <text
+                  x="390"
+                  y="88"
+                  textAnchor="middle"
+                  fontSize="13"
+                  fontWeight="700"
+                  letterSpacing="3"
+                  fill="rgba(6,182,212,0.65)"
+                  fontFamily="inherit"
+                >
+                  REPOSITORY OVERVIEW
                 </text>
               )}
 
-              {fileEdges.map(({ from, to }, idx) => {
-                const a = fileNodes.find((n) => n.id === from);
-                const b = fileNodes.find((n) => n.id === to);
+              {/* ✅ Uses edge.source / edge.target (ConstellationEdge shape) */}
+              {fileEdges.map((edge) => {
+                const a = fileNodes.find((n) => n.id === edge.source);
+                const b = fileNodes.find((n) => n.id === edge.target);
                 if (!a || !b) return null;
                 const colored =
                   (a.status === "done" && b.status === "done") ||
@@ -787,7 +800,7 @@ export default function ConstellationMap({
                   b.status === "current";
                 return (
                   <line
-                    key={idx}
+                    key={edge.id}
                     x1={a.x}
                     y1={a.y}
                     x2={b.x}

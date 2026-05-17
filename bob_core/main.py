@@ -1,26 +1,18 @@
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, Field, model_validator
+from typing import Optional, Any, List, Dict
+import os
+import shutil
+import hashlib
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
-import subprocess
-import tempfile
-import shutil
-import os
+from git import Repo
 
 load_dotenv()
 
 from bob_core.schemas import DependencyIntelligencePayload, IntelligenceRequest, OnboardPayload, RoadmapStep
-from bob_core.bob_service import generate_explanation, generate_checkpoint_quiz
-<<<<<<< HEAD
+from bob_core.bob_service import generate_explanation, generate_checkpoint_quiz, answer_question
 from engine.dependency_intelligence import build_dependency_intelligence
-=======
-from bob_core.context_service import ContextRetriever
-from bob_core.prompts import build_mentor_prompt, classify_query
-from bob_core.response_formatter import format_mentor_response, format_error_response, format_compass_response
-from bob_core.orchestration import CompassOrchestrator
-from bob_core.git_utils import clone_github_repo, cleanup_temp_repo, is_valid_github_url, GitCloneError
->>>>>>> fddb1bd4b432fd761f66db744cdeea688f89c7d2
 from engine.parser import parse_repository
 
 app = FastAPI(title="Compass AI", version="1.0.0")
@@ -33,99 +25,134 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-_clone_cache: dict[str, str] = {}
+WORKSPACE_DIR = os.path.join(os.getcwd(), "compass_workspaces")
+os.makedirs(WORKSPACE_DIR, exist_ok=True)
 
 
-def resolve_repo_path(repo_path: str) -> tuple[str, bool]:
-    if repo_path.startswith("https://github.com") or repo_path.startswith("http://github.com"):
-        if repo_path in _clone_cache:
-            cached = _clone_cache[repo_path]
-            if os.path.exists(cached):
-                return cached, False
-        tmp_dir = tempfile.mkdtemp(prefix="compass_clone_")
+def resolve_and_clone_repo(path_or_url: str) -> str:
+    stripped_path = path_or_url.strip()
+
+    if stripped_path.startswith("http://") or stripped_path.startswith("https://"):
+        url_hash = hashlib.md5(stripped_path.encode("utf-8")).hexdigest()[:12]
+        repo_name = stripped_path.split("/")[-1].replace(".git", "")
+        local_target_path = os.path.join(WORKSPACE_DIR, f"{repo_name}_{url_hash}")
+
+        if os.path.exists(local_target_path) and os.listdir(local_target_path):
+            print(f"📦 Workspace Cache Hit: Utilizing existing directory path: {local_target_path}")
+            return local_target_path
+
+        print(f"📥 Remote Git URL Detected. Initializing fresh workspace clone to: {local_target_path}")
         try:
-            subprocess.run(
-                ["git", "clone", "--depth", "1", repo_path, tmp_dir],
-                check=True,
-                capture_output=True,
-                timeout=60,
-            )
-            _clone_cache[repo_path] = tmp_dir
-            return tmp_dir, True
-        except subprocess.CalledProcessError as e:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-            raise ValueError(f"Git clone failed: {e.stderr.decode()[:200]}")
-        except subprocess.TimeoutExpired:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-            raise ValueError("Git clone timed out after 60 seconds.")
-        except FileNotFoundError:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-            raise ValueError("git is not installed or not on PATH.")
-    if not os.path.exists(repo_path):
-        raise ValueError(f"Repository path does not exist: {repo_path}")
-    return repo_path, False
+            if os.path.exists(local_target_path):
+                shutil.rmtree(local_target_path)
+            Repo.clone_from(stripped_path, local_target_path, depth=1)
+            return local_target_path
+        except Exception as clone_err:
+            raise RuntimeError(f"Failed to clone repository: {str(clone_err)}")
 
+    if not os.path.exists(stripped_path):
+        raise FileNotFoundError(f"Repository path does not exist: {stripped_path}")
+
+    return stripped_path
+
+
+# ── Shared validator mixin ────────────────────────────────────────────────────
+
+def _normalise_repo(data: Any) -> Any:
+    if isinstance(data, dict):
+        if not data.get("repo_path") and data.get("repo_url"):
+            data["repo_path"] = data["repo_url"]
+        elif not data.get("repo_url") and data.get("repo_path"):
+            data["repo_url"] = data["repo_path"]
+    return data
+
+
+# ── Request / Response models ─────────────────────────────────────────────────
 
 class OnboardRequest(BaseModel):
-    github_url: str
+    repo_path: Optional[str] = Field(default=None, alias="repo_url")
     task_description: Optional[str] = "Understand the codebase architecture"
+    module: Optional[str] = None
+    folder_filter: Optional[str] = None
 
-<<<<<<< HEAD
-=======
-class CompassAnalysisRequest(BaseModel):
-    github_url: str
-    task_description: Optional[str] = "Understand the codebase architecture"
-    max_roadmap_files: Optional[int] = 10
-    include_tests: Optional[bool] = False
->>>>>>> fddb1bd4b432fd761f66db744cdeea688f89c7d2
+    @model_validator(mode="before")
+    @classmethod
+    def check_path_or_url(cls, data: Any) -> Any:
+        return _normalise_repo(data)
+
+
+class FileContentRequest(BaseModel):
+    repo_path: Optional[str] = Field(default=None)
+    repo_url: Optional[str] = Field(default=None)
+    file_path: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalise_repo(cls, data: Any) -> Any:
+        return _normalise_repo(data)
+
 
 class AskRequest(BaseModel):
-    github_url: str
+    repo_path: Optional[str] = Field(default=None)
+    repo_url: Optional[str] = Field(default=None)
     question: str
     current_file: Optional[str] = None
-    context: Optional[dict] = None
+    context: Optional[Dict[str, Any]] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalise_repo(cls, data: Any) -> Any:
+        return _normalise_repo(data)
+
+
+class CitedFile(BaseModel):
+    path: str
+    reason: str
+    complexity: str
+    loc: int = 0
+
+
+class AskResponse(BaseModel):
+    answer: str
+    cited_files: List[CitedFile] = []
+    related_files: List[str] = []
+    next_steps: List[str] = []
+    confidence: float = 0.9
+    query_type: str = "general"
+
+
+# ── Endpoints ─────────────────────────────────────────────────────────────────
+
+@app.get("/health")
+async def health_check():
+    return {"status": "ok", "service": "Compass AI"}
 
 
 @app.post("/api/v1/generate-roadmap", response_model=OnboardPayload)
 async def generate_roadmap(request: OnboardRequest):
-    # Validate GitHub URL
-    if not is_valid_github_url(request.github_url):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid GitHub URL: {request.github_url}"
-        )
-    
-    temp_repo_path = None
-    try:
-<<<<<<< HEAD
-        local_path, _ = resolve_repo_path(request.repo_path)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=f"Repository resolution failed: {str(exc)}")
+    target_input = request.repo_path
+    if not target_input:
+        raise HTTPException(status_code=422, detail="Missing parameter: repo_path or repo_url is required.")
 
     try:
-        intelligence = build_dependency_intelligence(local_path)
+        local_workspace_path = resolve_and_clone_repo(target_input)
+        intelligence = build_dependency_intelligence(local_workspace_path)
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Repository intelligence failed: {str(exc)}")
-=======
-        # Clone the GitHub repository
-        temp_repo_path, repo_name = clone_github_repo(request.github_url)
-        
-        # Parse the cloned repository
-        repo_map = parse_repository(temp_repo_path)
-    except GitCloneError as exc:
-        raise HTTPException(status_code=422, detail=f"Failed to clone repository: {str(exc)}")
-    except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"Repository parsing failed: {str(exc)}")
-    finally:
-        # Cleanup temporary directory
-        if temp_repo_path:
-            cleanup_temp_repo(temp_repo_path)
->>>>>>> fddb1bd4b432fd761f66db744cdeea688f89c7d2
 
     roadmap_steps = []
     primary_file_content = ""
 
-    for item in intelligence.roadmap:
+    folder_filter = (request.folder_filter or request.module or "").lower().strip()
+
+    items_to_process = intelligence.roadmap
+    if folder_filter:
+        filtered = [i for i in intelligence.roadmap if folder_filter in i.file.lower()]
+        if filtered:
+            items_to_process = filtered
+            print(f"🔍 folder_filter='{folder_filter}': {len(filtered)}/{len(intelligence.roadmap)} files")
+
+    for item in items_to_process:
         try:
             file_context = (
                 f"File: {item.file}\n"
@@ -138,7 +165,7 @@ async def generate_roadmap(request: OnboardRequest):
                 primary_file_content = file_context
             learning_objective = await generate_explanation(
                 file_context,
-                request.task_description or "Understand the codebase architecture"
+                request.task_description or "Understand the codebase architecture",
             )
         except Exception:
             learning_objective = item.learning_reason
@@ -158,261 +185,102 @@ async def generate_roadmap(request: OnboardRequest):
 
     return OnboardPayload(roadmap=roadmap_steps, quiz=quiz)
 
-<<<<<<< HEAD
 
-@app.post("/api/v1/ask")
+@app.post("/api/v1/ask", response_model=AskResponse)
 async def ask_bob(request: AskRequest):
-    try:
-        local_path, _ = resolve_repo_path(request.repo_path)
-    except ValueError as exc:
-        from bob_core.response_formatter import format_error_response
-        return format_error_response(str(exc), "general")
-
-    try:
-        from bob_core.context_service import ContextRetriever
-        from bob_core.prompts import build_mentor_prompt, classify_query
-        from bob_core.response_formatter import format_mentor_response, format_error_response
-
-        retriever = ContextRetriever(local_path)
-        query_type = classify_query(request.question)
-        context = retriever.get_relevant_context(request.question, focus_file=request.current_file)
-
-        repo_context = {
-            "name": local_path.split(os.sep)[-1],
-            "files": retriever.repo_map.files if retriever.repo_map else {},
-        }
-
-        focus = context.get("focus")
-        prompt = build_mentor_prompt(
-            query_type=query_type,
-            repo_context=repo_context,
-            user_question=request.question,
-            file_path=request.current_file or "N/A",
-            imports=focus.imports if focus else [],
-            imported_by=focus.imported_by if focus else [],
-            complexity=focus.complexity if focus else "Unknown",
-            current_file=request.current_file or "N/A",
-=======
-@app.post("/api/v1/compass/analyze")
-async def analyze_repository_compass(request: CompassAnalysisRequest):
     """
-    Complete Compass AI Analysis Endpoint
-    
-    This is the main endpoint that orchestrates the complete workflow:
-    1. Clone GitHub repository to temporary directory
-    2. Parse repository using engine/parser.py
-    3. Calculate dependency intelligence using engine/dependency_intelligence.py
-    4. Generate learning roadmap with Bob's AI explanations
-    5. Create constellation graph for visualization
-    6. Return formatted JSON for frontend
-    7. Cleanup temporary directory
-    
-    Returns JSON structure:
-    {
-        "status": "success",
-        "dependency_radius_score": 8.5,
-        "learning_roadmap": [
-            {
-                "step": 1,
-                "file_path": "src/config/database.js",
-                "dependencies_count": 14,
-                "priority": "critical",
-                "bob_explanation": "...",
-                "architectural_layer": "Database Layer",
-                "complexity_score": 75,
-                "dependency_radius": 2
-            }
-        ],
-        "constellation_graph": {
-            "nodes": [{"id": "...", "label": "...", "group": "..."}],
-            "edges": [{"from": "...", "to": "...", "relationship": "imports"}]
-        },
-        "summary": {
-            "total_files": 45,
-            "total_dependencies": 120,
-            "circular_dependencies": 2,
-            "architectural_layers": {...},
-            "foundational_files": [...],
-            "hub_files": [...],
-            "risky_files": [...]
-        }
-    }
+    Chat endpoint — Bob answers questions about the codebase using
+    the dependency intelligence graph + WatsonX explanation engine.
     """
-    # Validate GitHub URL
-    if not is_valid_github_url(request.github_url):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid GitHub URL: {request.github_url}"
-        )
-    
-    temp_repo_path = None
+    repo_input = request.repo_path or request.repo_url
+    if not repo_input:
+        raise HTTPException(status_code=422, detail="Missing repo_path or repo_url")
+
     try:
-        # Clone the GitHub repository
-        temp_repo_path, repo_name = clone_github_repo(request.github_url)
-        
-        # Initialize orchestrator with cloned repo
-        orchestrator = CompassOrchestrator(
-            repo_path=temp_repo_path,
-            include_tests=request.include_tests or False
-        )
-        
-        # Run complete analysis
-        result = await orchestrator.generate_complete_analysis(
-            max_roadmap_files=request.max_roadmap_files or 10,
-            task_description=request.task_description or "Understand the codebase architecture"
-        )
-        
-        # Format response for frontend
-        formatted_response = format_compass_response(result)
-        
-        return formatted_response
-        
-    except GitCloneError as gce:
-        raise HTTPException(status_code=422, detail=f"Failed to clone repository: {str(gce)}")
-    except ValueError as ve:
-        raise HTTPException(status_code=422, detail=str(ve))
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Analysis failed: {str(e)}"
->>>>>>> fddb1bd4b432fd761f66db744cdeea688f89c7d2
-        )
-    finally:
-        # Always cleanup temporary directory
-        if temp_repo_path:
-            cleanup_temp_repo(temp_repo_path)
-
-        raw_answer = await generate_explanation(prompt, request.question)
-        return format_mentor_response(raw_answer, context, query_type)
-
+        local_workspace = resolve_and_clone_repo(repo_input)
+        intelligence = build_dependency_intelligence(local_workspace)
     except Exception as exc:
-        from bob_core.response_formatter import format_error_response
-        return format_error_response(str(exc), "general")
+        raise HTTPException(status_code=422, detail=f"Repo resolution failed: {str(exc)}")
 
+    question = request.question.strip()
+    q_lower = question.lower()
 
-@app.post("/api/v1/dependency-intelligence", response_model=DependencyIntelligencePayload)
-async def dependency_intelligence(request: IntelligenceRequest):
+    roadmap = intelligence.roadmap or []
+
+    if request.current_file:
+        cf = request.current_file.lower()
+        roadmap = sorted(roadmap, key=lambda i: (0 if cf in i.file.lower() else 1))
+
+    if any(k in q_lower for k in ["complex", "risky", "hard", "difficult"]):
+        roadmap = sorted(roadmap, key=lambda i: i.dependency_radius, reverse=True)
+
+    top_items = roadmap[:5]
+
+    combined_context = "\n\n".join(
+        f"File: {item.file}\n"
+        f"Layer: {item.architectural_layer}\n"
+        f"Complexity: {item.complexity_score}\n"
+        f"Dependencies: {', '.join(item.prerequisites[:3])}"
+        for item in top_items
+    )
+
     try:
-        local_path, _ = resolve_repo_path(request.repo_path)
-        return build_dependency_intelligence(local_path, include_tests=bool(request.include_tests))
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
-    except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"Dependency intelligence failed: {str(exc)}")
+        answer = await answer_question(combined_context, question)
+    except Exception:
+        answer = "Sorry, I encountered an issue processing your question against the codebase."
+
+    cited_files = [
+        CitedFile(
+            path=item.file,
+            reason=f"Identified within the structural {item.architectural_layer}.",
+            complexity=str(item.complexity_score)
+        )
+        for item in top_items
+    ]
+
+    related_files = [item.file for item in roadmap[5:10]]
+
+    next_steps = [
+        "Review the target code architectures listed in your cited files.",
+        "Verify edge-case handling across complex logic layers."
+    ]
+
+    return AskResponse(
+        answer=answer,
+        cited_files=cited_files,
+        related_files=related_files,
+        next_steps=next_steps,
+        confidence=0.95 if top_items else 0.50,
+        query_type="architecture" if "architecture" in q_lower else "general"
+    )
 
 
-@app.get("/api/v1/repo-map")
-async def repo_map(repo_path: str):
-    try:
-        local_path, _ = resolve_repo_path(repo_path)
-        return parse_repository(local_path)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
-    except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"Repository parsing failed: {str(exc)}")
-
-
-@app.get("/health")
-async def health_check():
-<<<<<<< HEAD
-    return {"status": "ok", "service": "Compass AI"}
-=======
-    return {"status": "ok", "service": "Compass AI"}
-
-@app.post("/api/v1/ask")
-async def ask_mentor(request: AskRequest):
+@app.post("/api/v1/file-content")
+async def get_file_content(request: FileContentRequest):
     """
-    Interactive Q&A with IBM Bob mentor
-    
-    Provides context-aware answers about repository structure and code
+    Retrieves the actual code contents of a specific file from the workspace.
     """
-    # Validate GitHub URL
-    if not is_valid_github_url(request.github_url):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid GitHub URL: {request.github_url}"
-        )
-    
-    # Determine query type early so we can use it in error responses
-    query_type = classify_query(request.question)
-    
-    temp_repo_path = None
+    repo_input = request.repo_path or request.repo_url
+    if not repo_input:
+        raise HTTPException(status_code=422, detail="Missing repo_path or repo_url")
+
     try:
-        # Clone the GitHub repository
-        temp_repo_path, repo_name = clone_github_repo(request.github_url)
+        local_workspace = resolve_and_clone_repo(repo_input)
+        safe_base = os.path.realpath(local_workspace)
+        target_path = os.path.realpath(os.path.join(safe_base, request.file_path.lstrip("/")))
         
-        # 1. Retrieve relevant context from cloned repo
-        retriever = ContextRetriever(temp_repo_path)
-        context = retriever.get_relevant_context(
-            query=request.question,
-            focus_file=request.current_file
-        )
-        
-        # 2. Build enhanced prompt
-        # Prepare context variables for prompt
-        prompt_kwargs = {
-            "file_path": request.current_file or "N/A",
-            "imports": [],
-            "imported_by": [],
-            "complexity": "Unknown"
-        }
-        
-        # Add focus file context if available
-        if context.get("focus"):
-            focus = context["focus"]
-            prompt_kwargs.update({
-                "file_path": focus.path,
-                "imports": focus.imports,
-                "imported_by": focus.imported_by,
-                "complexity": focus.complexity
-            })
-        
-        # Build the prompt
-        prompt = build_mentor_prompt(
-            query_type=query_type,
-            repo_context={
-                "name": repo_name,
-                "files": retriever.repo_map.files if retriever.repo_map else {}
-            },
-            user_question=request.question,
-            **prompt_kwargs
-        )
-        
-        # 3. Call IBM Bob via existing service
-        from bob_core.bob_service import build_payload, build_headers, WATSONX_GENERATE_URL
-        import httpx
-        
-        payload = build_payload(prompt, max_tokens=500)
-        
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                WATSONX_GENERATE_URL,
-                json=payload,
-                headers=build_headers(),
-                timeout=15.0
-            )
-            response.raise_for_status()
-            results = response.json().get("results", [])
-            raw_response = results[0].get("generated_text", "I couldn't generate a response.") if results else "I couldn't generate a response."
-        
-        # 4. Format for UI
-        formatted = format_mentor_response(
-            raw_response=raw_response,
-            context=context,
-            query_type=query_type
-        )
-        
-        return formatted
-        
-    except GitCloneError as gce:
-        return format_error_response(f"Failed to clone repository: {str(gce)}", query_type=query_type)
+        if not target_path.startswith(safe_base):
+            raise HTTPException(status_code=403, detail="Access denied: Directory traversal blocked.")
+            
+        if not os.path.exists(target_path) or os.path.isdir(target_path):
+            raise HTTPException(status_code=404, detail=f"File not found: {request.file_path}")
+
+        with open(target_path, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+
+        return {"file_path": request.file_path, "content": content}
+
     except HTTPException:
         raise
-    except Exception as e:
-        # Return formatted error response with correct query_type
-        return format_error_response(str(e), query_type=query_type)
-    finally:
-        # Always cleanup temporary directory
-        if temp_repo_path:
-            cleanup_temp_repo(temp_repo_path)
->>>>>>> fddb1bd4b432fd761f66db744cdeea688f89c7d2
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read file content: {str(exc)}")

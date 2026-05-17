@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
+import { getRepoUrl } from "@/lib/api";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface CitedFile {
@@ -25,19 +26,22 @@ interface BobChatPanelProps {
   repoPath?: string;
 }
 
+interface AskResponse {
+  answer: string;
+  cited_files: CitedFile[];
+  related_files: string[];
+  next_steps: string[];
+  confidence: number;
+  query_type: string;
+}
+
 // ── Config ────────────────────────────────────────────────────────────────────
 const BOB_API = "http://localhost:8000/api/v1";
-const REPO_PATH = "E:/team-avon/Team-AVON-Project-for-IBM-BOB-DEV-DAY";
 
 const QUICK_ACTIONS = [
   {
-    label: "Continue in AUTH",
-    primary: true,
-    question: "Where should I start in the AUTH module?",
-  },
-  {
     label: "Show me the riskiest files",
-    primary: false,
+    primary: true,
     question: "Which files are the most complex and risky?",
   },
   {
@@ -47,11 +51,10 @@ const QUICK_ACTIONS = [
   },
 ];
 
-// ── ID generator — no Date.now() in render ────────────────────────────────────
-let _id = 100;
+let _counter = 0;
 function nextId() {
-  _id += 1;
-  return _id.toString();
+  _counter += 1;
+  return `msg_${Date.now()}_${_counter}`;
 }
 
 // ── Bob avatar ────────────────────────────────────────────────────────────────
@@ -167,7 +170,6 @@ function MessageBubble({ msg }: { msg: Message }) {
       }}
     >
       {!isUser && <BobAvatar />}
-
       <div
         style={{
           maxWidth: "82%",
@@ -188,6 +190,7 @@ function MessageBubble({ msg }: { msg: Message }) {
             fontSize: 13,
             lineHeight: 1.6,
             color: isUser ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.75)",
+            whiteSpace: "pre-wrap",
           }}
         >
           {msg.content}
@@ -219,27 +222,50 @@ function MessageBubble({ msg }: { msg: Message }) {
                 key={f.path}
                 style={{
                   display: "flex",
-                  alignItems: "center",
+                  alignItems: "flex-start",
                   justifyContent: "space-between",
-                  padding: "4px 0",
+                  padding: "5px 0",
                   borderBottom: "1px solid rgba(255,255,255,0.04)",
+                  gap: 8,
                 }}
               >
-                <span
+                <div
                   style={{
-                    fontSize: 11,
-                    color: "#06b6d4",
-                    fontFamily: "monospace",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 2,
+                    minWidth: 0,
                   }}
                 >
-                  {f.path}
-                </span>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      color: "#06b6d4",
+                      fontFamily: "monospace",
+                      wordBreak: "break-all",
+                    }}
+                  >
+                    {f.path}
+                  </span>
+                  {f.reason && (
+                    <span
+                      style={{
+                        fontSize: 10,
+                        color: "rgba(255,255,255,0.3)",
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      {f.reason}
+                    </span>
+                  )}
+                </div>
                 <span
                   style={{
                     fontSize: 9,
                     fontWeight: 600,
-                    padding: "1px 6px",
+                    padding: "2px 6px",
                     borderRadius: 4,
+                    flexShrink: 0,
                     color:
                       f.complexity === "Easy"
                         ? "#10b981"
@@ -291,6 +317,7 @@ function MessageBubble({ msg }: { msg: Message }) {
                   fontSize: 12,
                   color: "rgba(255,255,255,0.5)",
                   marginBottom: 4,
+                  lineHeight: 1.5,
                 }}
               >
                 <span style={{ color: "#6d5ce7", flexShrink: 0 }}>
@@ -310,20 +337,16 @@ function MessageBubble({ msg }: { msg: Message }) {
 export default function BobChatPanel({
   selectedModule,
   selectedFile,
-  repoPath = REPO_PATH,
+  repoPath,
 }: BobChatPanelProps) {
+  const activeRepoPath = repoPath || getRepoUrl();
+
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "1",
       role: "bob",
       content:
-        "Hi! I've scanned this codebase and built a personalized learning roadmap for you.",
-    },
-    {
-      id: "2",
-      role: "bob",
-      content:
-        "Most new engineers start with AUTH — it's the foundation everything else depends on. Want to begin there?",
+        "Hi! I've scanned this codebase and built a personalized learning roadmap for you. Ask me anything about the code.",
     },
   ]);
   const [input, setInput] = useState("");
@@ -335,28 +358,34 @@ export default function BobChatPanel({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // ── Ask Bob — all IDs generated outside render via nextId() ──────────────
+  // Auto-contextual message when file/module changes
+  useEffect(() => {
+    if (selectedFile) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: nextId(),
+          role: "bob",
+          content: `You selected \`${selectedFile}\`. Ask me anything about this file — what it does, how it fits in, or where to start reading.`,
+        },
+      ]);
+    }
+  }, [selectedFile]);
+
+  // ── Ask Bob via real /ask endpoint ────────────────────────────────────────
   const askBob = useCallback(
     async (question: string) => {
       if (!question.trim() || isLoading) return;
 
       const userMsgId = nextId();
       const loadingId = nextId();
-      const responseid = nextId();
+      const responseId = nextId();
 
-      const userMsg: Message = {
-        id: userMsgId,
-        role: "user",
-        content: question,
-      };
-      const loadingMsg: Message = {
-        id: loadingId,
-        role: "bob",
-        content: "",
-        isLoading: true,
-      };
-
-      setMessages((prev) => [...prev, userMsg, loadingMsg]);
+      setMessages((prev) => [
+        ...prev,
+        { id: userMsgId, role: "user", content: question },
+        { id: loadingId, role: "bob", content: "", isLoading: true },
+      ]);
       setInput("");
       setIsLoading(true);
       setQuickActionsUsed(true);
@@ -366,48 +395,60 @@ export default function BobChatPanel({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            repo_path: repoPath,
+            repo_path: activeRepoPath,
+            repo_url: activeRepoPath,
             question,
             current_file: selectedFile ?? undefined,
             context: selectedModule
-              ? { task: `understanding ${selectedModule}` }
+              ? { task: `understanding the ${selectedModule} module` }
               : undefined,
           }),
         });
 
-        if (!response.ok) throw new Error("API error");
-        const data = await response.json();
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`HTTP ${response.status}: ${errText}`);
+        }
 
-        const bobMsg: Message = {
-          id: responseid,
-          role: "bob",
-          content: data.answer,
-          citedFiles: data.cited_files ?? [],
-          nextSteps: data.next_steps ?? [],
-        };
+        const data = (await response.json()) as AskResponse;
 
         setMessages((prev) =>
-          prev.map((m) => (m.id === loadingId ? bobMsg : m)),
+          prev.map((m) =>
+            m.id === loadingId
+              ? {
+                  id: responseId,
+                  role: "bob" as const,
+                  content: data.answer,
+                  citedFiles: data.cited_files ?? [],
+                  nextSteps: data.next_steps ?? [],
+                }
+              : m,
+          ),
         );
-      } catch {
-        const fallbackMsg: Message = {
-          id: responseid,
-          role: "bob",
-          content:
-            "I'm having trouble connecting to the backend. Make sure the server is running at localhost:8000 with `uvicorn bob_core.main:app --reload --port 8000`.",
-        };
+      } catch (err) {
+        console.error("BobChatPanel error:", err);
         setMessages((prev) =>
-          prev.map((m) => (m.id === loadingId ? fallbackMsg : m)),
+          prev.map((m) =>
+            m.id === loadingId
+              ? {
+                  id: responseId,
+                  role: "bob" as const,
+                  content:
+                    err instanceof Error
+                      ? `Something went wrong: ${err.message}`
+                      : "I couldn't reach the backend. Make sure the server is running at localhost:8000.",
+                }
+              : m,
+          ),
         );
       } finally {
         setIsLoading(false);
       }
     },
-    [isLoading, repoPath, selectedFile, selectedModule],
+    [isLoading, activeRepoPath, selectedFile, selectedModule],
   );
 
   const handleSend = () => askBob(input);
-
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -470,6 +511,28 @@ export default function BobChatPanel({
               Your AI code mentor
             </div>
           </div>
+          {/* Context indicator */}
+          {(selectedModule || selectedFile) && (
+            <div
+              style={{
+                marginLeft: "auto",
+                padding: "3px 8px",
+                borderRadius: 6,
+                background: "rgba(6,182,212,0.1)",
+                border: "1px solid rgba(6,182,212,0.2)",
+                fontSize: 10,
+                color: "#06b6d4",
+                maxWidth: 120,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {selectedFile
+                ? selectedFile.split("/").pop()
+                : selectedModule?.toUpperCase()}
+            </div>
+          )}
         </div>
       </div>
 
@@ -523,15 +586,13 @@ export default function BobChatPanel({
                     display: "flex",
                     alignItems: "center",
                     gap: 7,
-                    transition: "all 0.15s",
                     fontFamily: "inherit",
                   }}
                   onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLButtonElement).style.opacity =
-                      "0.8";
+                    e.currentTarget.style.opacity = "0.8";
                   }}
                   onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLButtonElement).style.opacity = "1";
+                    e.currentTarget.style.opacity = "1";
                   }}
                 >
                   {action.primary && (
@@ -574,7 +635,13 @@ export default function BobChatPanel({
         >
           <input
             type="text"
-            placeholder="Ask anything..."
+            placeholder={
+              selectedFile
+                ? `Ask about ${selectedFile.split("/").pop()}...`
+                : selectedModule
+                  ? `Ask about the ${selectedModule.toUpperCase()} module...`
+                  : "Ask anything about the codebase..."
+            }
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}

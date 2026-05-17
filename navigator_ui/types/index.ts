@@ -29,11 +29,13 @@ export interface ConstellationNode {
   dependencies: string[];
 }
 
+// ✅ FIX 1: type is now `string` (not the literal `"dependency"`)
+// This allows page.tsx to pass `type: "smoothstep"` without error.
 export interface ConstellationEdge {
   id: string;
   source: string;
   target: string;
-  type: "dependency";
+  type?: string;
 }
 
 export type DifficultyLevel = "LOW" | "MED" | "HIGH";
@@ -101,15 +103,20 @@ export interface VisualizationContainerProps {
 }
 
 export interface ConstellationMapProps {
-  nodes: ConstellationNode[];
+  // ✅ FIX 2: nodes and edges accept the mapped ConstellationEdge[] from page.tsx.
+  // ConstellationNode[] is kept for future static use; UIFileNode[] is passed at runtime
+  // via moduleFileNodes, so nodes/edges here use the already-mapped types.
+  nodes: UIFileNode[] | ConstellationNode[];
   edges: ConstellationEdge[];
   onNodeClick: (nodeId: string) => void;
   selectedNode: string | null;
   onViewChange?: (view: ViewType) => void;
   selectedModule?: string | null;
   onModuleChange?: (moduleId: string | null) => void;
+  // ✅ FIX 3: moduleFileNodes/moduleFileEdges use the mapped ConstellationEdge[],
+  // NOT the raw UIFileEdge[] — page.tsx always passes the mapped version.
   moduleFileNodes?: UIFileNode[];
-  moduleFileEdges?: UIFileEdge[];
+  moduleFileEdges?: ConstellationEdge[];
 }
 
 export interface GameLevelMapProps {
