@@ -8,12 +8,15 @@ import sys
 import json
 from pathlib import Path
 
+import pytest
+
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from bob_core.orchestration import CompassOrchestrator
 
 
+@pytest.mark.asyncio
 async def test_compass_integration():
     """Test the complete Compass AI workflow"""
     
@@ -130,6 +133,7 @@ async def test_compass_integration():
         return False
 
 
+@pytest.mark.asyncio
 async def test_api_endpoint():
     """Test the FastAPI endpoint (requires server to be running)"""
     print("\n" + "=" * 70)

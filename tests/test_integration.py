@@ -51,7 +51,7 @@ class TestAskEndpointIntegration:
         
         # Mock WatsonX API
         mock_client = AsyncMock()
-        mock_response = AsyncMock()
+        mock_response = Mock()
         mock_response.json.return_value = mock_watsonx_response
         mock_response.raise_for_status = Mock()
         mock_client.post.return_value = mock_response
@@ -85,7 +85,7 @@ class TestAskEndpointIntegration:
         })
         
         mock_client = AsyncMock()
-        mock_response = AsyncMock()
+        mock_response = Mock()
         mock_response.json.return_value = mock_watsonx_response
         mock_response.raise_for_status = Mock()
         mock_client.post.return_value = mock_response
@@ -112,7 +112,7 @@ class TestAskEndpointIntegration:
         })
         
         mock_client = AsyncMock()
-        mock_response = AsyncMock()
+        mock_response = Mock()
         mock_response.json.return_value = mock_watsonx_response
         mock_response.raise_for_status = Mock()
         mock_client.post.return_value = mock_response
@@ -177,7 +177,7 @@ class TestQueryClassificationIntegration:
         mock_parse.return_value = RepoMap(files={"auth.py": []})
 
         mock_client = AsyncMock()
-        mock_response = AsyncMock()
+        mock_response = Mock()
         mock_response.json.return_value = {
             "results": [{"generated_text": "This file handles authentication."}]
         }
@@ -203,7 +203,7 @@ class TestQueryClassificationIntegration:
         mock_parse.return_value = RepoMap(files={"main.py": [], "utils.py": []})
 
         mock_client = AsyncMock()
-        mock_response = AsyncMock()
+        mock_response = Mock()
         mock_response.json.return_value = {
             "results": [{"generated_text": "Start with utils.py."}]
         }
@@ -249,7 +249,7 @@ class TestContextRetrievalIntegration:
         mock_open.return_value = mock_open_func(read_data="# Mock file content\nclass Auth:\n    pass")()
         
         mock_client = AsyncMock()
-        mock_response = AsyncMock()
+        mock_response = Mock()
         mock_response.json.return_value = {
             "results": [{"generated_text": "Auth file with dependencies."}]
         }
@@ -299,7 +299,7 @@ class TestResponseFormattingIntegration:
         mock_open.return_value = mock_open_func(read_data="# Mock file content\nclass Auth:\n    pass")()
         
         mock_client = AsyncMock()
-        mock_response = AsyncMock()
+        mock_response = Mock()
         mock_response.json.return_value = {
             "results": [{"generated_text": "The `auth.py` file uses `models.py` for data models."}]
         }
@@ -329,7 +329,7 @@ class TestResponseFormattingIntegration:
         mock_parse.return_value = RepoMap(files={"auth.py": []})
         
         mock_client = AsyncMock()
-        mock_response = AsyncMock()
+        mock_response = Mock()
         mock_response.json.return_value = {
             "results": [{"generated_text": "Authentication logic."}]
         }

@@ -6,8 +6,8 @@ Provides a unified interface for accessing dependency analysis results
 
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
-from engine.dependency_intelligence import build_dependency_intelligence, DependencyIntelligencePayload
-from bob_core.schemas import DependencyNode
+from engine.dependency_intelligence import build_dependency_intelligence
+from bob_core.schemas import DependencyIntelligencePayload, DependencyNode
 
 
 @dataclass

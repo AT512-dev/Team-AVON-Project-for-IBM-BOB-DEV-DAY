@@ -4,6 +4,7 @@ Test script to verify GitHub URL cloning integration
 import asyncio
 import sys
 import os
+import pytest
 
 # Set UTF-8 encoding for Windows console
 if sys.platform == 'win32':
@@ -60,11 +61,9 @@ def test_clone_and_cleanup():
         print("[PASS] Cleanup successful")
         
     except GitCloneError as e:
-        print(f"[FAIL] Clone failed: {e}")
-        sys.exit(1)
+        pytest.skip(f"Skipping live GitHub clone test: {e}")
     except Exception as e:
-        print(f"[FAIL] Unexpected error: {e}")
-        sys.exit(1)
+        pytest.fail(f"Unexpected error: {e}")
 
 
 def test_invalid_url_handling():
@@ -75,15 +74,14 @@ def test_invalid_url_handling():
     
     try:
         clone_github_repo(invalid_url)
-        print("[FAIL] Should have raised GitCloneError")
-        sys.exit(1)
+        pytest.fail("Should have raised GitCloneError")
     except GitCloneError as e:
         print(f"[PASS] Correctly raised GitCloneError: {e}")
     except Exception as e:
-        print(f"[FAIL] Unexpected error type: {e}")
-        sys.exit(1)
+        pytest.fail(f"Unexpected error type: {e}")
 
 
+@pytest.mark.asyncio
 async def test_api_request_format():
     """Test that the API request format matches expectations"""
     print("\nTesting API request format...")
