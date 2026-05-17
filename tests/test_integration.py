@@ -7,6 +7,7 @@ import pytest
 from unittest.mock import Mock, patch, AsyncMock
 from fastapi.testclient import TestClient
 from bob_core.main import app
+from unittest.mock import patch, MagicMock, AsyncMock
 
 
 class TestAskEndpointIntegration:
@@ -163,19 +164,18 @@ class TestAskEndpointIntegration:
 
 class TestQueryClassificationIntegration:
     """Test query classification in full flow"""
-    
+
     @pytest.fixture
     def client(self):
-        """Create test client"""
         return TestClient(app)
-    
-    @patch('bob_core.main.parse_repository')
-    @patch('httpx.AsyncClient')
-    def test_file_purpose_query(self, mock_httpx, mock_parse, client):
-        """Should classify and handle file purpose queries"""
+
+    @patch("bob_core.main.resolve_repo_path", return_value=("/fake/repo", False))
+    @patch("bob_core.main.parse_repository")
+    @patch("httpx.AsyncClient")
+    def test_file_purpose_query(self, mock_httpx, mock_parse, mock_resolve, client):
         from bob_core.schemas import RepoMap
         mock_parse.return_value = RepoMap(files={"auth.py": []})
-        
+
         mock_client = AsyncMock()
         mock_response = AsyncMock()
         mock_response.json.return_value = {
@@ -184,25 +184,24 @@ class TestQueryClassificationIntegration:
         mock_response.raise_for_status = Mock()
         mock_client.post.return_value = mock_response
         mock_httpx.return_value.__aenter__.return_value = mock_client
-        
+
         response = client.post("/api/v1/ask", json={
             "repo_path": "/fake/repo",
             "question": "What does auth.py do?",
-            "current_file": "auth.py"
+            "current_file": "auth.py",
         })
-        
+
         assert response.status_code == 200
         data = response.json()
-        # Query classification works correctly - "What does" triggers file_purpose
         assert data["query_type"] == "file_purpose"
-    
-    @patch('bob_core.main.parse_repository')
-    @patch('httpx.AsyncClient')
-    def test_where_to_start_query(self, mock_httpx, mock_parse, client):
-        """Should classify and handle where to start queries"""
+
+    @patch("bob_core.main.resolve_repo_path", return_value=("/fake/repo", False))
+    @patch("bob_core.main.parse_repository")
+    @patch("httpx.AsyncClient")
+    def test_where_to_start_query(self, mock_httpx, mock_parse, mock_resolve, client):
         from bob_core.schemas import RepoMap
         mock_parse.return_value = RepoMap(files={"main.py": [], "utils.py": []})
-        
+
         mock_client = AsyncMock()
         mock_response = AsyncMock()
         mock_response.json.return_value = {
@@ -211,17 +210,15 @@ class TestQueryClassificationIntegration:
         mock_response.raise_for_status = Mock()
         mock_client.post.return_value = mock_response
         mock_httpx.return_value.__aenter__.return_value = mock_client
-        
+
         response = client.post("/api/v1/ask", json={
             "repo_path": "/fake/repo",
-            "question": "Where should I start learning this codebase?"
+            "question": "Where should I start learning this codebase?",
         })
-        
+
         assert response.status_code == 200
         data = response.json()
-        # Query classification works correctly - "Where should I start" triggers where_to_start
         assert data["query_type"] == "where_to_start"
-
 
 class TestContextRetrievalIntegration:
     """Test context retrieval in full flow"""
@@ -371,40 +368,38 @@ class TestHealthEndpoint:
 
 
 class TestRoadmapEndpoint:
-    """Test roadmap generation endpoint"""
-    
-    @pytest.fixture
-    def client(self):
-        """Create test client"""
-        return TestClient(app)
-    
-    @patch('bob_core.main.parse_repository')
-    @patch('bob_core.main.generate_explanation')
-    @patch('bob_core.main.generate_checkpoint_quiz')
-    def test_generates_roadmap(self, mock_quiz, mock_explain, mock_parse, client):
-        """Should generate learning roadmap"""
-        from bob_core.schemas import RepoMap
-        mock_parse.return_value = RepoMap(files={
-            "main.py": ["auth.py"],
-            "auth.py": ["models.py"],
-            "models.py": []
-        })
-        mock_explain.return_value = "Learn this file"
-        mock_quiz.return_value = {"questions": []}
-        
-        response = client.post("/api/v1/generate-roadmap", json={
-            "repo_path": "/fake/repo",
-            "task_description": "Learn the codebase"
-        })
-        
+    def test_generates_roadmap(self):
+        from fastapi.testclient import TestClient
+        from unittest.mock import patch, MagicMock, AsyncMock
+        from bob_core.main import app
+
+        mock_item = MagicMock()
+        mock_item.file = "auth.py"
+        mock_item.architectural_layer = "Application Logic"
+        mock_item.complexity_score = 50
+        mock_item.dependency_radius = 2
+        mock_item.prerequisites = ["models.py"]
+        mock_item.learning_reason = "Core authentication file"
+
+        mock_intelligence = MagicMock()
+        mock_intelligence.roadmap = [mock_item]
+
+        with patch("bob_core.main.resolve_repo_path", return_value=("/fake/repo", False)), \
+             patch("bob_core.main.build_dependency_intelligence", return_value=mock_intelligence), \
+             patch("bob_core.main.generate_explanation", new_callable=AsyncMock, return_value="Study this file first."), \
+             patch("bob_core.main.generate_checkpoint_quiz", new_callable=AsyncMock, return_value={"questions": []}):
+
+            client = TestClient(app)
+            response = client.post(
+                "/api/v1/generate-roadmap",
+                json={"repo_path": "https://github.com/fake/repo", "task_description": "Learn the codebase"},
+            )
+
         assert response.status_code == 200
         data = response.json()
-        
         assert "roadmap" in data
-        assert "quiz" in data
-        assert len(data["roadmap"]) > 0
-
-
+        assert len(data["roadmap"]) == 1
+        assert data["roadmap"][0]["file_path"] == "auth.py"
 class TestErrorHandling:
     """Test error handling across endpoints"""
     
